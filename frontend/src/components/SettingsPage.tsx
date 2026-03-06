@@ -8,6 +8,7 @@ type SettingsResponse =
   provider: string;
   model: string;
   timeout: number;
+  llm_server: string;
   availableModels: string[];
 };
 
@@ -16,6 +17,7 @@ function SettingsPage()
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('');
   const [timeout, setTimeoutValue] = useState('240');
+  const [llmServer, setLlmServer] = useState('');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -32,6 +34,7 @@ function SettingsPage()
         setProvider(response.data.provider);
         setModel(response.data.model);
         setTimeoutValue(String(response.data.timeout));
+        setLlmServer(response.data.llm_server ?? 'http://localhost:11434');
         setAvailableModels(response.data.availableModels);
       }
       catch
@@ -59,6 +62,7 @@ function SettingsPage()
       {
         model,
         timeout: Number(timeout),
+        llm_server: llmServer,
       });
 
       if (response.data.status === 'error')
@@ -100,6 +104,20 @@ function SettingsPage()
             Provider
           </label>
           <input className={styles.settingsInput} id="provider" type="text" value={provider} disabled />
+        </div>
+
+        <div className={styles.settingsField}>
+          <label className={styles.settingsLabel} htmlFor="llm_server">
+            LLM Server
+          </label>
+          <input
+            className={styles.settingsInput}
+            id="llm_server"
+            type="text"
+            placeholder="http://192.168.129.11:11434"
+            value={llmServer}
+            onChange={(event) => setLlmServer(event.target.value)}
+          />
         </div>
 
         <div className={styles.settingsField}>

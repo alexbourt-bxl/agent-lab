@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from llm import OllamaInterface
-from tools import read_file_tool, write_file_tool
+from tools import read_file_tool, set_workflow_context, write_file_tool
 
 
 DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
@@ -394,6 +394,7 @@ class Agent:
         )
 
         try:
+            set_workflow_context(agent_name=self.name, round_number=round_number)
             return tool.handler(**arguments)
         except TypeError as error:
             return f"Tool argument error for {tool_name}: {error}"

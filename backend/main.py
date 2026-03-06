@@ -88,6 +88,14 @@ class RunRequest(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     model: str
     timeout: float
+    llm_server: str
+
+
+def _normalize_llm_server(raw: str) -> str:
+    url = raw.strip()
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return url.rstrip("/")
 
 
 async def log_to_client(message: str) -> None:
@@ -170,9 +178,10 @@ def health() -> dict[str, str]:
 @app.get("/settings")
 async def get_settings() -> dict[str, Any]:
     settings = load_settings()
+    llm_server = _normalize_llm_server(str(settings.get("llm_server", "http://localhost:11434")))
 
     try:
-        available_models = await list_available_ollama_models()
+        available_models = await list_available_ollama_models(llm_server)
     except Exception:
         available_models = []
 
@@ -184,6 +193,7 @@ async def get_settings() -> dict[str, Any]:
         "provider": str(settings.get("provider", "ollama")),
         "model": current_model,
         "timeout": float(settings.get("timeout", 240.0)),
+        "llm_server": llm_server,
         "availableModels": available_models,
     }
 
@@ -192,6 +202,7 @@ async def get_settings() -> dict[str, Any]:
 async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
     model = request.model.strip()
     timeout = float(request.timeout)
+    llm_server = request.llm_server.strip()
 
     if model == "":
         return {
@@ -205,11 +216,18 @@ async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
             "message": "Timeout must be greater than zero.",
         }
 
+    if llm_server == "":
+        return {
+            "status": "error",
+            "message": "LLM server cannot be empty.",
+        }
+
     updated_settings = save_settings(
         {
             "provider": "ollama",
             "model": model,
             "timeout": timeout,
+            "llm_server": _normalize_llm_server(llm_server),
         }
     )
 

@@ -151,6 +151,7 @@ workflow.run()`);
   const [timeoutSeconds, setTimeoutSeconds] = useState(240);
   const abortControllerRef = useRef<AbortController | null>(null);
   const workflowStartTimeRef = useRef<number | null>(null);
+  const closedSocketIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() =>
   {
@@ -262,9 +263,14 @@ workflow.run()`);
 
   useEffect(() =>
   {
-    const socket = new WebSocket('ws://localhost:8000/ws/logs');
+    const effectId = Math.random().toString(36).slice(2, 10);
+    let socket: WebSocket | null = null;
 
-    socket.onopen = () =>
+    const timeoutId = setTimeout(() =>
+    {
+      socket = new WebSocket('ws://localhost:8000/ws/logs');
+
+      socket.onopen = () =>
     {
       // #region agent log
       debugLog('F3', 'logs_socket_open',
@@ -351,6 +357,10 @@ workflow.run()`);
 
     socket.onerror = () =>
     {
+      if (closedSocketIdsRef.current.has(effectId))
+      {
+        return;
+      }
       // #region agent log
       debugLog('F3', 'logs_socket_error',
       {
@@ -366,10 +376,16 @@ workflow.run()`);
         },
       ]);
     };
+    }, 0);
 
     return () =>
     {
-      socket.close();
+      clearTimeout(timeoutId);
+      closedSocketIdsRef.current.add(effectId);
+      if (socket !== null)
+      {
+        socket.close();
+      }
     };
   }, []);
 

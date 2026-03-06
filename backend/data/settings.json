@@ -1,5 +1,6 @@
 {
   "provider": "ollama",
   "model": "qwen3:4b",
-  "timeout": 300.0
+  "timeout": 300.0,
+  "llm_server": "http://192.168.129.11:11434"
 }

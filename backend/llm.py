@@ -24,6 +24,13 @@ def _debug_log(hypothesis_id: str, message: str, data: dict[str, object]) -> Non
         log_file.write(json.dumps(payload) + "\n")
 
 
+def _normalize_llm_server_url(raw: str) -> str:
+    url = raw.strip()
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    return f"{url.rstrip('/')}/api/generate"
+
+
 class OllamaInterface:
     def __init__(
         self,
@@ -32,7 +39,8 @@ class OllamaInterface:
         default_model: str | None = None,
     ) -> None:
         settings = load_settings()
-        self.base_url = base_url or "http://192.168.129.11:11434/api/generate"
+        llm_server = str(settings.get("llm_server", "http://localhost:11434"))
+        self.base_url = base_url or _normalize_llm_server_url(llm_server)
         self.timeout = timeout if timeout is not None else float(settings.get("timeout", 240.0))
         self.default_model = default_model or str(settings.get("model", "qwen3:4b"))
 

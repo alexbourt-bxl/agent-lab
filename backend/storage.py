@@ -12,6 +12,7 @@ DEFAULT_SETTINGS = {
     "provider": "ollama",
     "model": "qwen3:4b",
     "timeout": 300.0,
+    "llm_server": "http://localhost:11434",
 }
 
 
