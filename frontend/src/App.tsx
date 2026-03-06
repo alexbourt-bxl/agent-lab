@@ -22,22 +22,6 @@ type AgentStatus =
   round?: number
 }
 
-type SavedScript =
-{
-  id: string
-  name: string
-  code: string
-}
-
-type SavedAgent =
-{
-  id: string
-  variable: string
-  name: string
-  goal: string
-  sourceScriptId?: string | null
-}
-
 type LogVariant = 'thought' | 'tool-call' | 'result' | 'state' | 'default'
 
 function getLogVariant(logEntry: LogEntry): LogVariant
@@ -70,69 +54,24 @@ function formatStateLabel(state: string): string
   return state.replaceAll('_', ' ')
 }
 
-function buildAgentSnippet(savedAgent: SavedAgent): string
-{
-  return `${savedAgent.variable} = Agent(name="${savedAgent.name}", goal="${savedAgent.goal}")`
-}
-
-function upsertAgentSnippet(currentCode: string, savedAgent: SavedAgent): string
-{
-  const snippet = buildAgentSnippet(savedAgent)
-  const escapedVariable = savedAgent.variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const existingAgentPattern = new RegExp(`${escapedVariable}\\s*=\\s*Agent\\([^\\n]*\\)`)
-
-  if (existingAgentPattern.test(currentCode))
-  {
-    return currentCode.replace(existingAgentPattern, snippet)
-  }
-
-  const firstLoopMatch = currentCode.match(/^\w+\.loop\(\)$/m)
-  if (firstLoopMatch?.index !== undefined)
-  {
-    return `${currentCode.slice(0, firstLoopMatch.index)}${snippet}\n${currentCode.slice(firstLoopMatch.index)}`
-  }
-
-  return `${currentCode.trimEnd()}\n${snippet}\n`
-}
-
 function App()
 {
-  const [code, setCode] = useState(`researcher = Agent(name="Researcher", goal="Find one promising SaaS idea")
-analyst = Agent(name="Analyst", goal="Review the latest SaaS idea and improve it")
-researcher.loop()`)
+  const [code, setCode] = useState(`researcher = Agent(name="Researcher", goal="Find and refine a promising SaaS idea based on analyst feedback")
+analyst = Agent(name="Analyst", goal="Find faults in the researcher's latest SaaS idea and only mark done when the idea is strong enough")
+workflow = Workflow(
+  agents=
+  [
+    "researcher",
+    "analyst",
+  ],
+  entry_agent="researcher",
+  max_rounds=8,
+)
+
+workflow.run()`)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({})
-  const [savedScripts, setSavedScripts] = useState<SavedScript[]>([])
-  const [savedAgents, setSavedAgents] = useState<SavedAgent[]>([])
-  const [selectedScriptId, setSelectedScriptId] = useState('')
-  const [selectedAgentId, setSelectedAgentId] = useState('')
-  const [scriptName, setScriptName] = useState('SaaS Idea Workflow')
   const logPanelRef = useRef<HTMLDivElement | null>(null)
-
-  const appendLocalLog = (message: string, level: string = 'info') =>
-  {
-    setLogs((currentLogs) => [
-      ...currentLogs,
-      {
-        timestamp: new Date().toISOString(),
-        level,
-        message,
-        eventType: 'system',
-      },
-    ])
-  }
-
-  const fetchSavedResources = async () =>
-  {
-    const [scriptsResponse, agentsResponse] = await Promise.all(
-    [
-      axios.get<SavedScript[]>('http://localhost:8000/scripts'),
-      axios.get<SavedAgent[]>('http://localhost:8000/agents'),
-    ])
-
-    setSavedScripts(scriptsResponse.data)
-    setSavedAgents(agentsResponse.data)
-  }
 
   const handleRunAgent = async () =>
   {
@@ -157,66 +96,6 @@ researcher.loop()`)
         },
       ])
     }
-  }
-
-  const handleSaveScript = async () =>
-  {
-    try
-    {
-      const response = await axios.post<SavedScript>('http://localhost:8000/scripts',
-      {
-        id: selectedScriptId || undefined,
-        name: scriptName.trim() || 'Untitled workflow',
-        code,
-      })
-
-      setSelectedScriptId(response.data.id)
-      setScriptName(response.data.name)
-      await fetchSavedResources()
-      appendLocalLog(`Saved script "${response.data.name}".`)
-    }
-    catch
-    {
-      appendLocalLog('Failed to save the current script.', 'error')
-    }
-  }
-
-  const handleLoadScript = async () =>
-  {
-    if (selectedScriptId === '')
-    {
-      return
-    }
-
-    try
-    {
-      const response = await axios.get<SavedScript>(`http://localhost:8000/scripts/${selectedScriptId}`)
-      setCode(response.data.code)
-      setScriptName(response.data.name)
-      appendLocalLog(`Loaded script "${response.data.name}".`)
-    }
-    catch
-    {
-      appendLocalLog('Failed to load the selected script.', 'error')
-    }
-  }
-
-  const handleLoadAgent = () =>
-  {
-    if (selectedAgentId === '')
-    {
-      return
-    }
-
-    const savedAgent = savedAgents.find((agent) => agent.id === selectedAgentId)
-    if (savedAgent === undefined)
-    {
-      appendLocalLog('Failed to find the selected agent definition.', 'error')
-      return
-    }
-
-    setCode((currentCode) => upsertAgentSnippet(currentCode, savedAgent))
-    appendLocalLog(`Loaded agent "${savedAgent.name}".`)
   }
 
   useEffect(() =>
@@ -279,11 +158,6 @@ researcher.loop()`)
 
   useEffect(() =>
   {
-    void fetchSavedResources()
-  }, [])
-
-  useEffect(() =>
-  {
     if (logPanelRef.current === null)
     {
       return
@@ -297,7 +171,7 @@ researcher.loop()`)
       <header className="top-bar">
         <h1 className="app-title">Agent Lab</h1>
         <button className="run-button" type="button" onClick={handleRunAgent}>
-          Run Agent
+          Run Workflow
         </button>
       </header>
 
@@ -305,56 +179,6 @@ researcher.loop()`)
         <section className="panel">
           <div className="panel-header">Editor</div>
           <div className="panel-body editor-panel-body">
-            <div className="editor-toolbar">
-              <div className="editor-toolbar-group">
-                <input
-                  className="editor-input"
-                  type="text"
-                  value={scriptName}
-                  onChange={(event) => setScriptName(event.target.value)}
-                  placeholder="Script name"
-                />
-                <button className="editor-toolbar-button" type="button" onClick={handleSaveScript}>
-                  Save Script
-                </button>
-              </div>
-
-              <div className="editor-toolbar-group">
-                <select
-                  className="editor-select"
-                  value={selectedScriptId}
-                  onChange={(event) => setSelectedScriptId(event.target.value)}
-                >
-                  <option value="">Select saved script</option>
-                  {savedScripts.map((savedScript) => (
-                    <option key={savedScript.id} value={savedScript.id}>
-                      {savedScript.name}
-                    </option>
-                  ))}
-                </select>
-                <button className="editor-toolbar-button" type="button" onClick={handleLoadScript}>
-                  Load Script
-                </button>
-              </div>
-
-              <div className="editor-toolbar-group">
-                <select
-                  className="editor-select"
-                  value={selectedAgentId}
-                  onChange={(event) => setSelectedAgentId(event.target.value)}
-                >
-                  <option value="">Select saved agent</option>
-                  {savedAgents.map((savedAgent) => (
-                    <option key={savedAgent.id} value={savedAgent.id}>
-                      {savedAgent.name}
-                    </option>
-                  ))}
-                </select>
-                <button className="editor-toolbar-button" type="button" onClick={handleLoadAgent}>
-                  Load Agent
-                </button>
-              </div>
-            </div>
             <div className="editor-shell">
               <Editor
                 defaultLanguage="python"

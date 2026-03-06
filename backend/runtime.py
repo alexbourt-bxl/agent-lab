@@ -19,11 +19,27 @@ class Tool:
         self.handler = handler
 
 
+class Workflow:
+    def __init__(
+        self,
+        agents: list[str],
+        entry_agent: str | None = None,
+        max_rounds: int = 5,
+    ) -> None:
+        self.agents = agents
+        self.entry_agent = entry_agent
+        self.max_rounds = max_rounds
+
+    def run(self) -> None:
+        raise NotImplementedError("Workflow.run() is a script-level workflow entry point.")
+
+
 class Agent:
     def __init__(self, name: str, goal: str, llm: OllamaInterface | None = None) -> None:
         self.name = name
         self.goal = goal
         self.memory: list[str] = []
+        self.inbox: list[dict[str, Any]] = []
         self.llm = llm or OllamaInterface()
         self.tools: dict[str, Tool] = {}
         self.register_tool(
@@ -47,6 +63,9 @@ class Agent:
     def register_tool(self, tool: Tool) -> None:
         self.tools[tool.name] = tool
 
+    def receive_handoff(self, handoff_record: dict[str, Any]) -> None:
+        self.inbox.append(handoff_record)
+
     def step(self) -> None:
         raise NotImplementedError("Agent.step() must be implemented by subclasses.")
 
@@ -69,6 +88,8 @@ class Agent:
         available_agents: list[str] | None = None,
     ) -> dict[str, Any]:
         from main import emit_agent_event
+
+        self._ingest_handoffs()
 
         await emit_agent_event(
             agent_name=self.name,
@@ -133,6 +154,28 @@ class Agent:
             for tool in self.tools.values()
         )
 
+    def _ingest_handoffs(self) -> None:
+        if not self.inbox:
+            return
+
+        for handoff_record in self.inbox:
+            self.add_to_memory(self._format_handoff_record(handoff_record))
+
+        self.inbox.clear()
+
+    def _format_handoff_record(self, handoff_record: dict[str, Any]) -> str:
+        from_agent = str(handoff_record.get("fromAgent", "Unknown"))
+        summary = str(handoff_record.get("summary", ""))
+        tool_result = handoff_record.get("toolResult")
+
+        if isinstance(tool_result, str) and tool_result != "":
+            return (
+                f"Handoff from {from_agent}: "
+                f"{summary} | Tool result: {tool_result}"
+            )
+
+        return f"Handoff from {from_agent}: {summary}"
+
     def _build_prompt(self, available_agents: list[str]) -> str:
         teammate_names = [name for name in available_agents if name != self.name]
         teammate_summary = ", ".join(teammate_names) if teammate_names else "None"
@@ -144,6 +187,8 @@ class Agent:
             f"Available tools:\n{self._format_tools_for_prompt()}\n"
             f"Other agents in the workflow: {teammate_summary}\n"
             "Decide the next best action for this agent.\n"
+            "If your role is to review, critique, or analyze another agent's output, identify faults clearly and hand the work back until you are satisfied.\n"
+            "Only set done to true when your own goal is fully satisfied. If another agent still needs to revise work, keep done false.\n"
             "Use the available tools when they help complete the goal.\n"
             "If the goal involves creating a file, use write_file_tool.\n"
             "Prefer responding with a JSON block inside ```json fences using this shape:\n"
@@ -160,7 +205,7 @@ class Agent:
             "}\n"
             "```\n"
             "Use next_agent only if another agent should act after you.\n"
-            "Set done to true when the workflow goal is complete.\n"
+            "In multi-agent review workflows, the reviewing agent should usually be the one to set done to true after approval.\n"
             "If no tool is needed, you may omit tool and arguments.\n"
             "If you do not use JSON, include STOP when the goal is complete."
         )
@@ -363,12 +408,14 @@ class WorkflowRunner:
                 break
 
             if next_agent_name != current_agent_name:
-                handoff_message = self._build_handoff_message(
+                handoff_record = self._build_handoff_record(
                     source_agent_name=current_agent.name,
+                    target_agent_name=next_agent_name,
                     turn_result=turn_result,
+                    round_number=round_number,
                 )
                 next_agent = self.agents[next_agent_name]
-                next_agent.add_to_memory(handoff_message)
+                next_agent.receive_handoff(handoff_record)
 
                 await emit_agent_event(
                     agent_name=current_agent.name,
@@ -381,7 +428,7 @@ class WorkflowRunner:
                     agent_name=next_agent_name,
                     event_type="handoff",
                     state="waiting_for_turn",
-                    message=f"Received handoff from {current_agent.name}.",
+                    message=self._format_handoff_event_message(handoff_record),
                     round_number=round_number,
                 )
 
@@ -427,18 +474,33 @@ class WorkflowRunner:
         next_index = (current_index + 1) % len(self.agent_order)
         return self.agent_order[next_index]
 
-    def _build_handoff_message(
+    def _build_handoff_record(
         self,
         source_agent_name: str,
+        target_agent_name: str,
         turn_result: dict[str, Any],
-    ) -> str:
+        round_number: int,
+    ) -> dict[str, Any]:
         thought = str(turn_result.get("thought", ""))
         tool_result = turn_result.get("tool_result")
 
+        return {
+            "fromAgent": source_agent_name,
+            "toAgent": target_agent_name,
+            "summary": thought,
+            "toolResult": tool_result,
+            "round": round_number,
+        }
+
+    def _format_handoff_event_message(self, handoff_record: dict[str, Any]) -> str:
+        from_agent = str(handoff_record.get("fromAgent", "Unknown"))
+        summary = str(handoff_record.get("summary", ""))
+        tool_result = handoff_record.get("toolResult")
+
         if isinstance(tool_result, str) and tool_result != "":
             return (
-                f"Handoff from {source_agent_name}: "
-                f"{thought} | Tool result: {tool_result}"
+                f"Received handoff from {from_agent}: "
+                f"{summary} | Tool result: {tool_result}"
             )
 
-        return f"Handoff from {source_agent_name}: {thought}"
+        return f"Received handoff from {from_agent}: {summary}"

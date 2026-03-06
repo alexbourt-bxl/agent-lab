@@ -1,0 +1,19 @@
+{
+  "id": "8890f355-2383-481c-a37f-7fb09816b82c",
+  "name": "SaaS Idea Workflow",
+  "code": "researcher = Agent(name=\"Researcher\", goal=\"Find one promising SaaS idea\")\nanalyst = Agent(name=\"Analyst\", goal=\"Review the latest SaaS idea and improve it\")\nresearcher.loop()\n",
+  "agents": [
+    {
+      "variable": "researcher",
+      "name": "Researcher",
+      "goal": "Find one promising SaaS idea"
+    },
+    {
+      "variable": "analyst",
+      "name": "Analyst",
+      "goal": "Review the latest SaaS idea and improve it"
+    }
+  ],
+  "entryAgentVariable": "researcher",
+  "updatedAt": "2026-03-06T11:32:46.436121+00:00"
+}
