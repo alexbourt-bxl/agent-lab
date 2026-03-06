@@ -241,6 +241,7 @@ def extract_agent_configs(code: str) -> list[dict[str, str | None]]:
                 "variable": match.group("variable"),
                 "name": name,
                 "goal": goal,
+                "role": extract_string_argument(arguments, "role"),
                 "inputSourceVariable": extract_input_source_variable(arguments),
             }
         )
@@ -357,6 +358,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
             Agent(
                 name=str(config["name"]),
                 goal=str(config["goal"]),
+                role=str(config.get("role") or ""),
                 input_source=(
                     variable_to_name.get(str(config["inputSourceVariable"]))
                     if config.get("inputSourceVariable") is not None

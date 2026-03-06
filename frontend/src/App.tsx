@@ -110,14 +110,16 @@ function App()
   const mainSplitRef = useRef<HTMLDivElement | null>(null);
   const [pathname, setPathname] = useState(getCurrentPathname);
   const [code, setCode] = useState(`researcher = Agent(
-    name="Researcher", 
+    name="Researcher",
+    role="Market researcher specializing in SaaS and B2B trends.",
     goal="Find and refine a promising SaaS idea based on analyst feedback",
     input=analyst.output
 )
 
 analyst = Agent(
-  name="Analyst", 
-  goal="Find faults in the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+  name="Analyst",
+  role="Critical analyst who identifies flaws and improvement opportunities.",
+  goal="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
   input=researcher.output
 )
 

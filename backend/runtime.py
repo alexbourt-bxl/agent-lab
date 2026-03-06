@@ -58,6 +58,7 @@ class Agent:
         self,
         name: str,
         goal: str,
+        role: str = "",
         input: str | None = None,
         output: str = "",
         input_source: str | None = None,
@@ -65,6 +66,7 @@ class Agent:
     ) -> None:
         self.name = name
         self.goal = goal
+        self.role = role
         self.input = input
         self.output = output
         self.input_source = input_source
@@ -148,7 +150,16 @@ class Agent:
                 self.name,
             ]
         )
-        raw_output = await self.llm.generate(prompt=prompt, model=model)
+        system = (
+            f"You are {self.name}. {self.role}"
+            if self.role
+            else None
+        )
+        raw_output = await self.llm.generate(
+            prompt=prompt,
+            model=model,
+            system=system,
+        )
         structured_output = self._extract_structured_output(raw_output)
         thought = self._extract_thought(raw_output, structured_output)
 

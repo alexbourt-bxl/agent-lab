@@ -36,15 +36,22 @@ class OllamaInterface:
         self.timeout = timeout if timeout is not None else float(settings.get("timeout", 240.0))
         self.default_model = default_model or str(settings.get("model", "qwen3:4b"))
 
-    async def generate(self, prompt: str, model: str | None = None) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> str:
         selected_model = model or self.default_model
-        payload = (
+        payload: dict[str, object] = (
             {
                 "model": selected_model,
                 "prompt": prompt,
                 "stream": False,
             }
         )
+        if system is not None and system != "":
+            payload["system"] = system
 
         try:
             # region agent log
