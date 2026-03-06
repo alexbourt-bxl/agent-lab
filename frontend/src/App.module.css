@@ -23,6 +23,13 @@
   background-color: #151922;
 }
 
+.topBarActions
+{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .appTitle
 {
   margin: 0;
@@ -38,10 +45,23 @@
   color: #f9fafb;
 }
 
+.secondaryButton
+{
+  border: 1px solid #3b4252;
+  background-color: #11151d;
+  color: #cbd5e1;
+}
+
 .runButton:hover
 {
   border-color: #6b7280;
   background-color: #273244;
+}
+
+.secondaryButton:hover
+{
+  border-color: #6b7280;
+  background-color: #18202c;
 }
 
 .contentArea
@@ -143,7 +163,18 @@
     align-items: stretch;
   }
 
+  .topBarActions
+  {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .runButton
+  {
+    width: 100%;
+  }
+
+  .secondaryButton
   {
     width: 100%;
   }

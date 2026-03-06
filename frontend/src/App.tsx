@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import CodeEditor from './components/CodeEditor';
 import LogList from './components/LogList';
+import SettingsPage from './components/SettingsPage';
 import StatusView from './components/StatusView';
 import styles from './App.module.css';
 
@@ -68,6 +69,16 @@ function writePercentageCookie(name: string, value: number): void
   document.cookie = `${name}=${value}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; samesite=lax`;
 }
 
+function getCurrentPathname(): string
+{
+  if (typeof window === 'undefined')
+  {
+    return '/';
+  }
+
+  return window.location.pathname;
+}
+
 function debugLog(hypothesisId: string, message: string, data: Record<string, unknown>): void
 {
   // #region agent log
@@ -97,6 +108,7 @@ function App()
 {
   const contentAreaRef = useRef<HTMLDivElement | null>(null);
   const mainSplitRef = useRef<HTMLDivElement | null>(null);
+  const [pathname, setPathname] = useState(getCurrentPathname);
   const [code, setCode] = useState(`researcher = Agent(
     name="Researcher", 
     goal="Find and refine a promising SaaS idea based on analyst feedback",
@@ -284,6 +296,32 @@ workflow.run()`);
     writePercentageCookie(LOG_HEIGHT_COOKIE_NAME, logHeightPercent);
   }, [logHeightPercent]);
 
+  useEffect(() =>
+  {
+    const handlePopState = () =>
+    {
+      setPathname(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () =>
+    {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
+  const navigateTo = (nextPathname: string) =>
+  {
+    if (window.location.pathname === nextPathname)
+    {
+      return;
+    }
+
+    window.history.pushState({}, '', nextPathname);
+    setPathname(nextPathname);
+  };
+
   const handleVerticalResizeStart = (event: React.PointerEvent<HTMLDivElement>) =>
   {
     const mainSplit = mainSplitRef.current;
@@ -350,49 +388,65 @@ workflow.run()`);
     <div className={styles.appShell}>
       <header className={styles.topBar}>
         <h1 className={styles.appTitle}>Agent Lab</h1>
-        <button className={styles.runButton} type="button" onClick={handleRunAgent}>
-          Run Workflow
-        </button>
+        <div className={styles.topBarActions}>
+          <button className={styles.secondaryButton} type="button" onClick={() => navigateTo('/')}>
+            Workflow
+          </button>
+          <button className={styles.secondaryButton} type="button" onClick={() => navigateTo('/settings')}>
+            Settings
+          </button>
+          {pathname !== '/settings' && (
+            <button className={styles.runButton} type="button" onClick={handleRunAgent}>
+              Run Workflow
+            </button>
+          )}
+        </div>
       </header>
 
-      <div className={styles.contentArea} ref={contentAreaRef}>
-        <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
-          <div className={styles.mainSplit} ref={mainSplitRef}>
-            <section className={styles.panel} style={{ width: `calc(${editorWidthPercent}% - 4px)` }}>
-              <div className={styles.panelHeader}>Code Editor</div>
-              <CodeEditor code={code} onCodeChange={setCode} />
-            </section>
-
-            <div
-              className={styles.verticalResizeHandle}
-              onPointerDown={handleVerticalResizeStart}
-              role="separator"
-              aria-label="Resize editor and status panels"
-              aria-orientation="vertical"
-            />
-
-            <section className={styles.panel} style={{ width: `calc(${100 - editorWidthPercent}% - 4px)` }}>
-              <div className={styles.panelHeader}>Status</div>
-              <StatusView
-                agentStatuses={Object.values(agentStatuses)}
-                workflowResult={workflowResult}
-              />
-            </section>
-          </div>
+      {pathname === '/settings' ? (
+        <div className={styles.contentArea}>
+          <SettingsPage onBack={() => navigateTo('/')} />
         </div>
+      ) : (
+        <div className={styles.contentArea} ref={contentAreaRef}>
+          <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
+            <div className={styles.mainSplit} ref={mainSplitRef}>
+              <section className={styles.panel} style={{ width: `calc(${editorWidthPercent}% - 4px)` }}>
+                <div className={styles.panelHeader}>Code Editor</div>
+                <CodeEditor code={code} onCodeChange={setCode} />
+              </section>
 
-        <div
-          className={styles.horizontalResizeHandle}
-          onPointerDown={handleHorizontalResizeStart}
-          role="separator"
-          aria-label="Resize logs panel"
-          aria-orientation="horizontal"
-        />
+              <div
+                className={styles.verticalResizeHandle}
+                onPointerDown={handleVerticalResizeStart}
+                role="separator"
+                aria-label="Resize editor and status panels"
+                aria-orientation="vertical"
+              />
 
-        <section className={`${styles.panel} ${styles.bottomPanel}`} style={{ height: `calc(${logHeightPercent}% - 4px)` }}>
-          <LogList logs={logs} onClearLogs={() => setLogs([])} />
-        </section>
-      </div>
+              <section className={styles.panel} style={{ width: `calc(${100 - editorWidthPercent}% - 4px)` }}>
+                <div className={styles.panelHeader}>Status</div>
+                <StatusView
+                  agentStatuses={Object.values(agentStatuses)}
+                  workflowResult={workflowResult}
+                />
+              </section>
+            </div>
+          </div>
+
+          <div
+            className={styles.horizontalResizeHandle}
+            onPointerDown={handleHorizontalResizeStart}
+            role="separator"
+            aria-label="Resize logs panel"
+            aria-orientation="horizontal"
+          />
+
+          <section className={`${styles.panel} ${styles.bottomPanel}`} style={{ height: `calc(${logHeightPercent}% - 4px)` }}>
+            <LogList logs={logs} onClearLogs={() => setLogs([])} />
+          </section>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,111 @@
+.settingsPanel
+{
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid #2a2f3a;
+  border-radius: 12px;
+  background-color: #151922;
+  overflow: hidden;
+}
+
+.settingsHeaderRow
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2a2f3a;
+}
+
+.settingsHeader
+{
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.settingsBody
+{
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.settingsField
+{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settingsLabel
+{
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.settingsInput
+{
+  border: 1px solid #3b4252;
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  background-color: #11151d;
+  color: #f9fafb;
+  font: inherit;
+}
+
+.settingsActions
+{
+  display: flex;
+  justify-content: flex-start;
+}
+
+.primaryButton,
+.secondaryButton
+{
+  border: 1px solid #3b4252;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.primaryButton
+{
+  background-color: #1f2937;
+  color: #f9fafb;
+}
+
+.secondaryButton
+{
+  background-color: #11151d;
+  color: #cbd5e1;
+}
+
+.errorMessage
+{
+  color: #f87171;
+}
+
+.successMessage
+{
+  color: #4ade80;
+}
+
+@media (max-width: 900px)
+{
+  .settingsHeaderRow
+  {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

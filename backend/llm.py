@@ -4,6 +4,7 @@ import sys
 import time
 
 import httpx
+from storage import load_settings
 
 
 DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
@@ -26,16 +27,20 @@ def _debug_log(hypothesis_id: str, message: str, data: dict[str, object]) -> Non
 class OllamaInterface:
     def __init__(
         self,
-        base_url: str = "http://192.168.129.11:11434/api/generate",
-        timeout: float = 240.0,
+        base_url: str | None = None,
+        timeout: float | None = None,
+        default_model: str | None = None,
     ) -> None:
-        self.base_url = base_url
-        self.timeout = timeout
+        settings = load_settings()
+        self.base_url = base_url or "http://192.168.129.11:11434/api/generate"
+        self.timeout = timeout if timeout is not None else float(settings.get("timeout", 240.0))
+        self.default_model = default_model or str(settings.get("model", "qwen3:4b"))
 
-    async def generate(self, prompt: str, model: str = "qwen3:4b") -> str:
+    async def generate(self, prompt: str, model: str | None = None) -> str:
+        selected_model = model or self.default_model
         payload = (
             {
-                "model": model,
+                "model": selected_model,
                 "prompt": prompt,
                 "stream": False,
             }
@@ -48,7 +53,7 @@ class OllamaInterface:
                 "ollama_generate_start",
                 {
                     "baseUrl": self.base_url,
-                    "model": model,
+                    "model": selected_model,
                     "timeout": self.timeout,
                     "pythonExecutable": sys.executable,
                     "promptLength": len(prompt),
@@ -112,3 +117,36 @@ class OllamaInterface:
         )
         # endregion
         return str(data.get("response", ""))
+
+
+def get_ollama_tags_url(base_url: str | None = None) -> str:
+    generate_url = base_url or OllamaInterface().base_url
+    if generate_url.endswith("/api/generate"):
+        return generate_url.replace("/api/generate", "/api/tags")
+
+    return f"{generate_url.rstrip('/')}/api/tags"
+
+
+async def list_available_ollama_models(base_url: str | None = None) -> list[str]:
+    tags_url = get_ollama_tags_url(base_url)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(tags_url)
+        response.raise_for_status()
+
+    payload = response.json()
+    models = payload.get("models", [])
+    if not isinstance(models, list):
+        return []
+
+    available_models: list[str] = []
+
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+
+        model_name = model.get("name")
+        if isinstance(model_name, str) and model_name not in available_models:
+            available_models.append(model_name)
+
+    return available_models

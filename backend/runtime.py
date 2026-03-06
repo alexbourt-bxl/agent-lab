@@ -99,7 +99,7 @@ class Agent:
     def step(self) -> None:
         raise NotImplementedError("Agent.step() must be implemented by subclasses.")
 
-    async def loop(self, model: str = "qwen3:4b", max_iterations: int = 5) -> None:
+    async def loop(self, model: str | None = None, max_iterations: int = 5) -> None:
         runner = WorkflowRunner(
             agents=
             [
@@ -112,7 +112,7 @@ class Agent:
 
     async def execute_turn(
         self,
-        model: str = "qwen3:4b",
+        model: str | None = None,
         round_number: int = 1,
         max_rounds: int = 5,
         available_agents: list[str] | None = None,
@@ -447,7 +447,7 @@ class WorkflowRunner:
         self.max_rounds = max_rounds
         self.connections = connections or {}
 
-    async def run(self, model: str = "qwen3:4b") -> None:
+    async def run(self, model: str | None = None) -> None:
         from main import emit_agent_event, emit_event
 
         if not self.agent_order:

@@ -10,7 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
+from llm import list_available_ollama_models
 from runtime import Agent, Workflow, WorkflowRunner
+from storage import load_settings, save_settings
 
 
 DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
@@ -82,6 +84,11 @@ class RunRequest(BaseModel):
     code: str
 
 
+class SettingsUpdateRequest(BaseModel):
+    model: str
+    timeout: float
+
+
 async def log_to_client(message: str) -> None:
     await emit_event(event_type="system", message=message)
 
@@ -135,6 +142,58 @@ async def emit_agent_event(
 def health() -> dict[str, str]:
     return {
         "status": "ok",
+    }
+
+
+@app.get("/settings")
+async def get_settings() -> dict[str, Any]:
+    settings = load_settings()
+
+    try:
+        available_models = await list_available_ollama_models()
+    except Exception:
+        available_models = []
+
+    current_model = str(settings.get("model", "qwen3:4b"))
+    if current_model not in available_models:
+        available_models.insert(0, current_model)
+
+    return {
+        "provider": str(settings.get("provider", "ollama")),
+        "model": current_model,
+        "timeout": float(settings.get("timeout", 240.0)),
+        "availableModels": available_models,
+    }
+
+
+@app.put("/settings")
+async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
+    model = request.model.strip()
+    timeout = float(request.timeout)
+
+    if model == "":
+        return {
+            "status": "error",
+            "message": "Model cannot be empty.",
+        }
+
+    if timeout <= 0:
+        return {
+            "status": "error",
+            "message": "Timeout must be greater than zero.",
+        }
+
+    updated_settings = save_settings(
+        {
+            "provider": "ollama",
+            "model": model,
+            "timeout": timeout,
+        }
+    )
+
+    return {
+        "status": "ok",
+        "settings": updated_settings,
     }
 
 
