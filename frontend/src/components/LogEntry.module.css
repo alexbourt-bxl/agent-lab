@@ -1,8 +1,8 @@
 .logEntry
 {
   display: grid;
-  grid-template-columns: 140px 100px 1fr;
-  gap: 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: start;
   padding: 0px 12px;
   border-radius: 10px;
@@ -70,10 +70,3 @@
   color: #f87171;
 }
 
-@media (max-width: 900px)
-{
-  .logEntry
-  {
-    grid-template-columns: 1fr;
-  }
-}

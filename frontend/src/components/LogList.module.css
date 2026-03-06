@@ -18,9 +18,19 @@
 
 .logList
 {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 140px max-content 1fr;
+  gap: 0 12px;
+  row-gap: 4px;
   font-family: 'Cascadia Code', 'Consolas', monospace;
   font-size: 0.9rem;
+}
+
+@media (max-width: 900px)
+{
+  .logList
+  {
+    grid-template-columns: 1fr;
+  }
 }
 

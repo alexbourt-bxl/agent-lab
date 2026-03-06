@@ -27,27 +27,21 @@ def _normalize_results_path(target_path: Path) -> Path:
 def _resolve_path(filename: str) -> Path:
     target_path = Path(filename)
 
-    if not target_path.is_absolute():
-        session_id = _workflow_session_id.get()
-        if target_path.parts and target_path.parts[0] == "results":
-            target_path = WORKSPACE_ROOT / target_path
-        else:
-            if session_id is not None:
-                target_path = RESULTS_ROOT / session_id / target_path
-            else:
-                target_path = RESULTS_ROOT / target_path
+    if target_path.is_absolute():
+        return _normalize_results_path(target_path)
 
-    target_path = _normalize_results_path(target_path)
-
-    return target_path
+    session_id = _workflow_session_id.get()
+    if target_path.parts and target_path.parts[0] == "results":
+        return _normalize_results_path(WORKSPACE_ROOT / target_path)
+    if session_id is not None:
+        target_path = _normalize_results_path(target_path)
+        return RESULTS_ROOT / session_id / f"{session_id}_{target_path.name}"
+    return _normalize_results_path(RESULTS_ROOT / target_path)
 
 
 def write_file_tool(filename: str, content: str) -> str:
     target_path = _resolve_path(filename)
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    session_id = _workflow_session_id.get()
-    if session_id is not None:
-        content = f"<!-- workflow_session: {session_id} -->\n\n{content}"
     target_path.write_text(content, encoding="utf-8")
     return f"Wrote file: {target_path}\n\n{content}"
 

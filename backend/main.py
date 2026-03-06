@@ -456,7 +456,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
 
     from tools import set_workflow_session_id
 
-    session_id = uuid.uuid4().hex
+    session_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
     await emit_event(
         event_type="workflow_started",
