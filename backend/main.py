@@ -5,7 +5,7 @@ import re
 import time
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -13,6 +13,15 @@ import uvicorn
 from llm import list_available_ollama_models
 from runtime import Agent, Workflow, WorkflowRunner
 from storage import load_settings, save_settings
+from tools import (
+    get_workflow_session_id,
+    initialize_workflow_session,
+    read_session_result_file,
+    read_workflow_snapshot,
+    record_agent_output,
+    set_workflow_session_id,
+    sync_workflow_event,
+)
 from workflow_state import cancel_requested
 
 
@@ -112,6 +121,7 @@ async def emit_event(
     agent_order: list[str] | None = None,
     session_id: str | None = None,
 ) -> None:
+    resolved_session_id = session_id or get_workflow_session_id()
     payload = (
         {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -133,8 +143,18 @@ async def emit_event(
     if agent_order is not None:
         payload["agentOrder"] = agent_order
 
-    if session_id is not None:
-        payload["sessionId"] = session_id
+    if resolved_session_id is not None:
+        payload["sessionId"] = resolved_session_id
+
+    sync_workflow_event(
+        event_type=event_type,
+        message=message,
+        state=state,
+        agent_name=agent_name,
+        round_number=round_number,
+        agent_order=agent_order,
+        session_id=resolved_session_id,
+    )
 
     await manager.broadcast(payload)
 
@@ -156,6 +176,7 @@ async def emit_agent_event(
 
 
 async def emit_agent_output(agent_name: str, output: str) -> None:
+    session_id = get_workflow_session_id()
     payload: dict[str, Any] = (
         {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -165,6 +186,10 @@ async def emit_agent_output(agent_name: str, output: str) -> None:
             "output": output,
         }
     )
+    if session_id is not None:
+        payload["sessionId"] = session_id
+
+    record_agent_output(agent_name=agent_name, output=output, session_id=session_id)
     await manager.broadcast(payload)
 
 
@@ -195,6 +220,30 @@ async def get_settings() -> dict[str, Any]:
         "timeout": float(settings.get("timeout", 240.0)),
         "llm_server": llm_server,
         "availableModels": available_models,
+    }
+
+
+@app.get("/sessions/{session_id}/workflow")
+async def get_workflow_session(session_id: str) -> dict[str, Any]:
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    return snapshot
+
+
+@app.get("/sessions/{session_id}/results/{filename:path}")
+async def get_session_result_file(session_id: str, filename: str) -> dict[str, str]:
+    try:
+        content = read_session_result_file(session_id, filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Result file not found.") from None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session or filename.") from None
+
+    return {
+        "filename": Path(filename).name,
+        "content": content,
     }
 
 
@@ -329,7 +378,7 @@ async def stop_workflow() -> dict[str, str]:
 
 
 @app.post("/run")
-async def run_agent(request: RunRequest) -> dict[str, str]:
+async def run_agent(request: RunRequest) -> dict[str, Any]:
     cancel_requested.clear()
     # region agent log
     _debug_log(
@@ -442,16 +491,6 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
 
     start_agent_name = variable_to_name.get(workflow.start_agent) if workflow.start_agent else agents[0].name
 
-    for agent in agents:
-        agent.add_to_memory("Agent instantiated from submitted script.")
-        await emit_agent_event(
-            agent_name=agent.name,
-            event_type="state",
-            message=f"Instantiated agent '{agent.name}' with goal '{agent.goal}'.",
-            state="waiting_for_turn",
-            round_number=0,
-        )
-
     agent_order = [config["name"] for config in selected_agent_configs]
     runner = WorkflowRunner(
         agents=agents,
@@ -472,10 +511,20 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
     # endregion
     import uuid
 
-    from tools import set_workflow_session_id
-
     session_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
+    initialize_workflow_session(session_id, agent_order)
+
+    for agent in agents:
+        agent.add_to_memory("Agent instantiated from submitted script.")
+        await emit_agent_event(
+            agent_name=agent.name,
+            event_type="state",
+            message=f"Instantiated agent '{agent.name}' with goal '{agent.goal}'.",
+            state="waiting_for_turn",
+            round_number=0,
+        )
+
     await emit_event(
         event_type="workflow_started",
         message="Workflow started.",
@@ -488,6 +537,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
         return {
             "status": "ok",
             "message": f"Workflow finished for {len(agents)} agent(s).",
+            "sessionId": session_id,
         }
     finally:
         set_workflow_session_id(None)

@@ -18,6 +18,7 @@ type LogEntry =
   agentName?: string;
   state?: string;
   round?: number;
+  sessionId?: string;
 };
 
 type AgentStatus =
@@ -29,9 +30,42 @@ type AgentStatus =
   stepStartTime?: number;
 };
 
+type SessionAgentSnapshot =
+{
+  name: string;
+  state: string;
+  message: string;
+  round?: number;
+  lastResultFile?: string | null;
+  resultFiles?: string[];
+  output?: string;
+  stepStartedAt?: string | null;
+};
+
+type WorkflowSessionSnapshot =
+{
+  sessionId: string;
+  status: string;
+  agentOrder: string[];
+  currentAgent?: string | null;
+  currentRound?: number;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  workflowResult?: string | null;
+  workflowResultFile?: string | null;
+  agents: Record<string, SessionAgentSnapshot>;
+};
+
+type SessionResultResponse =
+{
+  filename: string;
+  content: string;
+};
+
 const EDITOR_WIDTH_COOKIE_NAME = 'agent_lab_editor_width';
 const LOG_HEIGHT_COOKIE_NAME = 'agent_lab_log_height';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+const CURRENT_SESSION_ID_STORAGE_KEY = 'agent_lab_current_session_id';
 
 function clampPercentage(value: number, minimum: number, maximum: number): number
 {
@@ -71,6 +105,32 @@ function readPercentageCookie(
 function writePercentageCookie(name: string, value: number): void
 {
   document.cookie = `${name}=${value}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; samesite=lax`;
+}
+
+function readStoredSessionId(): string | null
+{
+  if (typeof window === 'undefined')
+  {
+    return null;
+  }
+
+  return window.localStorage.getItem(CURRENT_SESSION_ID_STORAGE_KEY);
+}
+
+function writeStoredSessionId(sessionId: string | null): void
+{
+  if (typeof window === 'undefined')
+  {
+    return;
+  }
+
+  if (sessionId === null || sessionId === '')
+  {
+    window.localStorage.removeItem(CURRENT_SESSION_ID_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(CURRENT_SESSION_ID_STORAGE_KEY, sessionId);
 }
 
 function getCurrentPathname(): string
@@ -143,6 +203,7 @@ workflow.run()`);
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [agentOutputs, setAgentOutputs] = useState<Record<string, string>>({});
   const [workflowResult, setWorkflowResult] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(readStoredSessionId);
   const [editorActiveTab, setEditorActiveTab] = useState('code');
   const [isRunning, setIsRunning] = useState(false);
   const [, setTick] = useState(0);
@@ -152,20 +213,180 @@ workflow.run()`);
   const abortControllerRef = useRef<AbortController | null>(null);
   const workflowStartTimeRef = useRef<number | null>(null);
   const closedSocketIdsRef = useRef<Set<string>>(new Set());
+  const currentSessionIdRef = useRef<string | null>(currentSessionId);
+  const sessionRefreshTimeoutRef = useRef<number | null>(null);
+
+  const persistCurrentSessionId = (sessionId: string | null) =>
+  {
+    currentSessionIdRef.current = sessionId;
+    setCurrentSessionId(sessionId);
+    writeStoredSessionId(sessionId);
+  };
+
+  const clearSessionSnapshot = () =>
+  {
+    setAgentStatuses({});
+    setAgentOrder([]);
+    setAgentOutputs({});
+    setWorkflowResult(null);
+    workflowStartTimeRef.current = null;
+  };
+
+  const loadResultContent = async (sessionId: string, filename: string): Promise<string> =>
+  {
+    const response = await axios.get<SessionResultResponse>(
+      `http://localhost:8000/sessions/${sessionId}/results/${encodeURIComponent(filename)}`,
+    );
+    return response.data.content;
+  };
+
+  const loadSession = async (sessionId: string) =>
+  {
+    try
+    {
+      const response = await axios.get<WorkflowSessionSnapshot>(
+        `http://localhost:8000/sessions/${sessionId}/workflow`,
+      );
+      const snapshot = response.data;
+      const snapshotAgents = snapshot.agents ?? {};
+      const orderedAgentNames = snapshot.agentOrder ?? [];
+      const agentNames = [
+        ...orderedAgentNames,
+        ...Object.keys(snapshotAgents).filter((agentName) => !orderedAgentNames.includes(agentName)),
+      ];
+
+      const nextAgentStatuses = Object.fromEntries(
+        agentNames.map((agentName) =>
+        {
+          const agentSnapshot = snapshotAgents[agentName];
+          const parsedStepStartTime =
+            typeof agentSnapshot?.stepStartedAt === 'string'
+              ? Date.parse(agentSnapshot.stepStartedAt)
+              : Number.NaN;
+
+          return [
+            agentName,
+            {
+              name: agentName,
+              state: agentSnapshot?.state ?? 'waiting_for_turn',
+              message: agentSnapshot?.message ?? '',
+              round: agentSnapshot?.round,
+              stepStartTime: Number.isNaN(parsedStepStartTime) ? undefined : parsedStepStartTime,
+            },
+          ];
+        }),
+      );
+
+      const nextAgentOutputs = Object.fromEntries(
+        await Promise.all(
+          agentNames.map(async (agentName) =>
+          {
+            const agentSnapshot = snapshotAgents[agentName];
+            let output = agentSnapshot?.output ?? '';
+
+            if (typeof agentSnapshot?.lastResultFile === 'string' && agentSnapshot.lastResultFile !== '')
+            {
+              try
+              {
+                output = await loadResultContent(snapshot.sessionId, agentSnapshot.lastResultFile);
+              }
+              catch
+              {
+                output = agentSnapshot?.output ?? '';
+              }
+            }
+
+            return [agentName, output] as const;
+          }),
+        ),
+      );
+
+      let nextWorkflowResult = snapshot.workflowResult ?? null;
+      if (typeof snapshot.workflowResultFile === 'string' && snapshot.workflowResultFile !== '')
+      {
+        try
+        {
+          nextWorkflowResult = await loadResultContent(snapshot.sessionId, snapshot.workflowResultFile);
+        }
+        catch
+        {
+          nextWorkflowResult = snapshot.workflowResult ?? null;
+        }
+      }
+
+      setAgentOrder(agentNames);
+      setAgentStatuses(nextAgentStatuses);
+      setAgentOutputs(nextAgentOutputs);
+      setWorkflowResult(nextWorkflowResult);
+
+      const parsedStartedAt =
+        typeof snapshot.startedAt === 'string'
+          ? Date.parse(snapshot.startedAt)
+          : Number.NaN;
+      workflowStartTimeRef.current =
+        snapshot.status === 'running' && !Number.isNaN(parsedStartedAt)
+          ? parsedStartedAt
+          : null;
+
+      persistCurrentSessionId(snapshot.sessionId);
+    }
+    catch (error)
+    {
+      const isMissingSession =
+        axios.isAxiosError(error) && error.response?.status === 404;
+
+      if (isMissingSession && currentSessionIdRef.current === sessionId)
+      {
+        persistCurrentSessionId(null);
+        clearSessionSnapshot();
+      }
+    }
+  };
+
+  const scheduleSessionRefresh = (sessionId: string) =>
+  {
+    if (sessionRefreshTimeoutRef.current !== null)
+    {
+      window.clearTimeout(sessionRefreshTimeoutRef.current);
+    }
+
+    sessionRefreshTimeoutRef.current = window.setTimeout(() =>
+    {
+      sessionRefreshTimeoutRef.current = null;
+      void loadSession(sessionId);
+    }, 50);
+  };
+
+  useEffect(() =>
+  {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
 
   useEffect(() =>
   {
     void axios.get<{ timeout: number }>('http://localhost:8000/settings')
       .then((res) => setTimeoutSeconds(res.data.timeout))
       .catch(() => {});
+
+    if (currentSessionIdRef.current !== null)
+    {
+      void loadSession(currentSessionIdRef.current);
+    }
+
+    return () =>
+    {
+      if (sessionRefreshTimeoutRef.current !== null)
+      {
+        window.clearTimeout(sessionRefreshTimeoutRef.current);
+      }
+    };
   }, []);
 
   const handleRunAgent = async () =>
   {
     setLogs([]);
-    setAgentStatuses({});
-    setAgentOrder([]);
-    setWorkflowResult(null);
+    clearSessionSnapshot();
+    persistCurrentSessionId(null);
     setIsRunning(true);
     workflowStartTimeRef.current = Date.now();
     abortControllerRef.current = new AbortController();
@@ -198,6 +419,11 @@ workflow.run()`);
         data: response.data,
       });
       // #endregion
+
+      if (typeof response.data.sessionId === 'string' && response.data.sessionId !== '')
+      {
+        await loadSession(response.data.sessionId);
+      }
     }
     catch (error)
     {
@@ -287,59 +513,20 @@ workflow.run()`);
         const logEntry = JSON.parse(event.data) as LogEntry;
         setLogs((currentLogs) => [...currentLogs, logEntry]);
 
-        if (logEntry.eventType === 'workflow_started' && 'agentOrder' in logEntry)
+        if (typeof logEntry.sessionId === 'string' && logEntry.sessionId !== '')
         {
-          const order = (logEntry as { agentOrder?: string[] }).agentOrder;
-          if (Array.isArray(order))
+          if (logEntry.eventType === 'workflow_started')
           {
-            setAgentOrder(order);
+            persistCurrentSessionId(logEntry.sessionId);
           }
-        }
 
-        if (logEntry.eventType === 'workflow_result')
-        {
-          setWorkflowResult(logEntry.message);
-        }
-
-        if (logEntry.eventType === 'agent_output' && logEntry.agentName !== undefined && 'output' in logEntry)
-        {
-          const agentName = logEntry.agentName as string;
-          const output = String((logEntry as { output?: string }).output ?? '');
-
-          setAgentOutputs((prev) => ({ ...prev, [agentName]: output }));
-        }
-
-        if (logEntry.agentName !== undefined && logEntry.state !== undefined)
-        {
-          const agentName = logEntry.agentName as string;
-          const newState = logEntry.state as string;
-          const isActiveStep = newState === 'thinking' || newState === 'working';
-
-          setAgentStatuses((currentStatuses) =>
+          if (
+            currentSessionIdRef.current === null ||
+            currentSessionIdRef.current === logEntry.sessionId
+          )
           {
-            const prev = currentStatuses[agentName];
-            const prevWasActive = prev?.state === 'thinking' || prev?.state === 'working';
-            const stepStartTime =
-              isActiveStep
-                ? (prevWasActive && prev?.stepStartTime !== undefined
-                  ? prev.stepStartTime
-                  : Date.now())
-                : undefined;
-
-            return (
-              {
-                ...currentStatuses,
-                [agentName]:
-                {
-                  name: agentName,
-                  state: newState,
-                  message: logEntry.message,
-                  round: logEntry.round,
-                  stepStartTime,
-                },
-              }
-            );
-          });
+            scheduleSessionRefresh(logEntry.sessionId);
+          }
         }
       }
       catch
