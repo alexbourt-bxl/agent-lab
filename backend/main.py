@@ -118,20 +118,55 @@ def health() -> dict[str, str]:
     }
 
 
-def extract_agent_configs(code: str) -> list[dict[str, str]]:
+def extract_string_argument(arguments: str, argument_name: str) -> str | None:
+    match = re.search(
+        rf'{argument_name}\s*=\s*(?P<quote>["\'])(?P<value>.*?)(?P=quote)',
+        arguments,
+        re.DOTALL,
+    )
+    if match is None:
+        return None
+
+    return match.group("value")
+
+
+def extract_input_source_variable(arguments: str) -> str | None:
+    match = re.search(
+        r'input\s*=\s*(?P<source_variable>\w+)\.output',
+        arguments,
+    )
+    if match is None:
+        return None
+
+    return match.group("source_variable")
+
+
+def extract_agent_configs(code: str) -> list[dict[str, str | None]]:
     matches = re.finditer(
-        r'(?P<variable>\w+)\s*=\s*Agent\(\s*name\s*=\s*(?P<name_quote>["\'])(?P<name>.*?)(?P=name_quote)\s*,\s*goal\s*=\s*(?P<goal_quote>["\'])(?P<goal>.*?)(?P=goal_quote)\s*\)',
+        r'(?P<variable>\w+)\s*=\s*Agent\((?P<arguments>.*?)\)',
         code,
         re.DOTALL,
     )
-    return [
-        {
-            "variable": match.group("variable"),
-            "name": match.group("name"),
-            "goal": match.group("goal"),
-        }
-        for match in matches
-    ]
+    agent_configs: list[dict[str, str | None]] = []
+
+    for match in matches:
+        arguments = match.group("arguments")
+        name = extract_string_argument(arguments, "name")
+        goal = extract_string_argument(arguments, "goal")
+
+        if name is None or goal is None:
+            continue
+
+        agent_configs.append(
+            {
+                "variable": match.group("variable"),
+                "name": name,
+                "goal": goal,
+                "inputSourceVariable": extract_input_source_variable(arguments),
+            }
+        )
+
+    return agent_configs
 
 
 def extract_start_agent_variable(code: str) -> str | None:
@@ -209,6 +244,19 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
             "message": "The workflow must reference one or more defined agent variables.",
         }
 
+    for config in selected_agent_configs:
+        input_source_variable = config.get("inputSourceVariable")
+
+        if input_source_variable is None:
+            continue
+
+        if input_source_variable not in variable_to_config:
+            await log_to_client("An agent input referenced an undefined upstream agent output.")
+            return {
+                "status": "error",
+                "message": f"Agent '{config['variable']}' references undefined input source '{input_source_variable}.output'.",
+            }
+
     workflow = Workflow(
         agents=workflow_config["agentVariables"],
         start_agent=workflow_config["entryAgent"],
@@ -216,10 +264,40 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
     )
     agents = (
         [
-            Agent(name=config["name"], goal=config["goal"])
+            Agent(
+                name=str(config["name"]),
+                goal=str(config["goal"]),
+                input_source=(
+                    variable_to_name.get(str(config["inputSourceVariable"]))
+                    if config.get("inputSourceVariable") is not None
+                    else None
+                ),
+            )
             for config in selected_agent_configs
         ]
     )
+    connections: dict[str, str] = {}
+
+    for config in selected_agent_configs:
+        input_source_variable = config.get("inputSourceVariable")
+
+        if input_source_variable is None:
+            continue
+
+        source_agent_name = variable_to_name.get(str(input_source_variable))
+        target_agent_name = str(config["name"])
+        if source_agent_name is None:
+            continue
+
+        if source_agent_name in connections:
+            await log_to_client("Multiple agents cannot consume the same output in this MVP.")
+            return {
+                "status": "error",
+                "message": f"Output from '{source_agent_name}' is connected to multiple agents. This MVP supports a single downstream per output.",
+            }
+
+        connections[source_agent_name] = target_agent_name
+
     start_agent_name = variable_to_name.get(workflow.start_agent) if workflow.start_agent else agents[0].name
 
     for agent in agents:
@@ -236,6 +314,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
         agents=agents,
         start_agent_name=start_agent_name,
         max_rounds=workflow.max_rounds,
+        connections=connections,
     )
     await runner.run()
 

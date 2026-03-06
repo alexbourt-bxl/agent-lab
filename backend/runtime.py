@@ -35,9 +35,20 @@ class Workflow:
 
 
 class Agent:
-    def __init__(self, name: str, goal: str, llm: OllamaInterface | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        goal: str,
+        input: str | None = None,
+        output: str = "",
+        input_source: str | None = None,
+        llm: OllamaInterface | None = None,
+    ) -> None:
         self.name = name
         self.goal = goal
+        self.input = input
+        self.output = output
+        self.input_source = input_source
         self.memory: list[str] = []
         self.inbox: list[dict[str, Any]] = []
         self.llm = llm or OllamaInterface()
@@ -132,6 +143,8 @@ class Agent:
                 round_number=round_number,
             )
 
+        self.output = self._build_output_value(thought=thought, tool_result=tool_result)
+
         return {
             "done": self._should_stop(
                 raw_output=raw_output,
@@ -148,6 +161,12 @@ class Agent:
 
         return " | ".join(self.memory[-5:])
 
+    def _build_output_value(self, thought: str, tool_result: str | None) -> str:
+        if isinstance(tool_result, str) and tool_result != "":
+            return tool_result
+
+        return thought
+
     def _format_tools_for_prompt(self) -> str:
         return "\n".join(
             f"- {tool.name}: {tool.description}"
@@ -159,6 +178,10 @@ class Agent:
             return
 
         for handoff_record in self.inbox:
+            output_value = handoff_record.get("output")
+            if isinstance(output_value, str) and output_value != "":
+                self.input = output_value
+
             self.add_to_memory(self._format_handoff_record(handoff_record))
 
         self.inbox.clear()
@@ -183,6 +206,7 @@ class Agent:
         return (
             f"Agent name: {self.name}\n"
             f"Goal: {self.goal}\n"
+            f"Current input: {self.input if self.input else 'None'}\n"
             f"Current memory summary: {self._summarize_memory()}\n"
             f"Available tools:\n{self._format_tools_for_prompt()}\n"
             f"Other agents in the workflow: {teammate_summary}\n"
@@ -337,6 +361,7 @@ class WorkflowRunner:
         agents: list[Agent],
         start_agent_name: str | None = None,
         max_rounds: int = 5,
+        connections: dict[str, str] | None = None,
     ) -> None:
         self.agents = (
             {
@@ -352,6 +377,7 @@ class WorkflowRunner:
         )
         self.start_agent_name = start_agent_name or self.agent_order[0]
         self.max_rounds = max_rounds
+        self.connections = connections or {}
 
     async def run(self, model: str = "qwen3:4b") -> None:
         from main import emit_agent_event, emit_event
@@ -464,6 +490,13 @@ class WorkflowRunner:
         current_agent_name: str,
         requested_next_agent: str | None,
     ) -> str | None:
+        connected_agent_name = self.connections.get(current_agent_name)
+        if connected_agent_name is not None:
+            if connected_agent_name in self.agents:
+                return connected_agent_name
+
+            return None
+
         if requested_next_agent in self.agents:
             return requested_next_agent
 
@@ -489,6 +522,7 @@ class WorkflowRunner:
             "toAgent": target_agent_name,
             "summary": thought,
             "toolResult": tool_result,
+            "output": self.agents[source_agent_name].output,
             "round": round_number,
         }
 

@@ -27,20 +27,22 @@ type AgentStatus =
 function App()
 {
   const [code, setCode] = useState(`researcher = Agent(
-  name="Researcher", 
-  goal="Find and refine a promising SaaS idea based on analyst feedback"
+    name="Researcher", 
+    goal="Find and refine a promising SaaS idea based on analyst feedback",
+    input=analyst.output
 )
 
 analyst = Agent(
   name="Analyst", 
-  goal="Find faults in the researcher's latest SaaS idea and only mark done when the idea is strong enough"
+  goal="Find faults in the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+  input=researcher.output
 )
 
 workflow = Workflow(
   agents=
   [
     "researcher",
-    "analyst",
+    "analyst"
   ],
   start_agent="researcher",
   max_rounds=8
@@ -144,7 +146,7 @@ workflow.run()`);
 
       <main className={styles.mainContent}>
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>Editor</div>
+          <div className={styles.panelHeader}>Code Editor</div>
           <CodeEditor code={code} onCodeChange={setCode} />
         </section>
 
