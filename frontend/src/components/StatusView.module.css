@@ -30,9 +30,17 @@
   background-color: #11151d;
 }
 
+.workflowResultHeader
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .workflowResultLabel
 {
-  margin-bottom: 8px;
   color: #93c5fd;
   font-size: 0.8rem;
   font-weight: 700;

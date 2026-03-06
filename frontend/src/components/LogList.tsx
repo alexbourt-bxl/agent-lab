@@ -16,7 +16,6 @@ type LogVariant = 'thought' | 'tool-call' | 'result' | 'state' | 'default';
 type LogListProps =
 {
   logs: LogEntryRecord[];
-  onClearLogs: () => void;
 };
 
 function getLogVariant(logEntry: LogEntryRecord): LogVariant
@@ -52,7 +51,6 @@ function getLogVariant(logEntry: LogEntryRecord): LogVariant
 function LogList(
 {
   logs,
-  onClearLogs,
 }: LogListProps)
 {
   const logPanelRef = useRef<HTMLDivElement | null>(null);
@@ -68,14 +66,7 @@ function LogList(
   }, [logs]);
 
   return (
-    <>
-      <div className={styles.panelHeader}>
-        <span>Execution Logs</span>
-        <button className={styles.clearLogsButton} type="button" onClick={onClearLogs}>
-          Clear Logs
-        </button>
-      </div>
-      <div className={styles.panelBody} ref={logPanelRef}>
+    <div className={styles.panelBody} ref={logPanelRef}>
         {logs.length === 0 ? (
           <div className={styles.panelPlaceholder}>
             Waiting for execution logs...
@@ -100,8 +91,7 @@ function LogList(
             })}
           </div>
         )}
-      </div>
-    </>
+    </div>
   );
 }
 

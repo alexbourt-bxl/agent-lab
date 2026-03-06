@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Button from './Button';
 import axios from 'axios';
 import styles from './SettingsPage.module.css';
 
@@ -10,15 +11,7 @@ type SettingsResponse =
   availableModels: string[];
 };
 
-type SettingsPageProps =
-{
-  onBack: () => void;
-};
-
-function SettingsPage(
-{
-  onBack,
-}: SettingsPageProps)
+function SettingsPage()
 {
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('');
@@ -100,9 +93,6 @@ function SettingsPage(
     <section className={styles.settingsPanel}>
       <div className={styles.settingsHeaderRow}>
         <div className={styles.settingsHeader}>Settings</div>
-        <button className={styles.secondaryButton} type="button" onClick={onBack}>
-          Back To Lab
-        </button>
       </div>
       <div className={styles.settingsBody}>
         <div className={styles.settingsField}>
@@ -154,9 +144,9 @@ function SettingsPage(
         )}
 
         <div className={styles.settingsActions}>
-          <button className={styles.primaryButton} type="button" onClick={handleSave} disabled={isSaving}>
+          <Button variant="primary" onClick={handleSave} disabled={isSaving}>
             {isSaving ? 'Saving...' : 'Save Settings'}
-          </button>
+          </Button>
         </div>
       </div>
     </section>

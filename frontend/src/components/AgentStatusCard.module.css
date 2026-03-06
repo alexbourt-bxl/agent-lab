@@ -6,6 +6,12 @@
   background-color: #11151d;
 }
 
+.agentStatusCardError
+{
+  border-color: #dc2626;
+  background-color: rgba(220, 38, 38, 0.08);
+}
+
 .agentStatusRow
 {
   display: flex;
@@ -27,9 +33,22 @@
   font-size: 0.9rem;
 }
 
+.agentStatusMessageError
+{
+  color: #f87171;
+}
+
+.agentStatusFooter
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .agentStatusRound
 {
-  margin-top: 8px;
   color: #94a3b8;
   font-size: 0.8rem;
 }

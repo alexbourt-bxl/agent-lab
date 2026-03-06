@@ -1,0 +1,110 @@
+.button
+{
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.button:focus,
+.button:focus-visible
+{
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.buttonIcon
+{
+  display: inline-flex;
+  align-items: center;
+}
+
+.buttonElapsed
+{
+  margin-left: 0.35rem;
+  opacity: 0.85;
+}
+
+.buttonSpinner
+{
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: buttonSpin 0.8s linear infinite;
+}
+
+@keyframes buttonSpin
+{
+  from
+  {
+    transform: rotate(0deg);
+  }
+
+  to
+  {
+    transform: rotate(360deg);
+  }
+}
+
+.buttonPrimary
+{
+  border: 1px solid #3b4252;
+  background-color: #1f2937;
+  color: #f9fafb;
+}
+
+.buttonPrimary:hover:not(:disabled)
+{
+  border-color: #6b7280;
+  background-color: #273244;
+}
+
+.buttonSecondary
+{
+  border: 1px solid #3b4252;
+  background-color: #11151d;
+  color: #cbd5e1;
+}
+
+.buttonSecondary:hover:not(:disabled)
+{
+  border-color: #6b7280;
+  background-color: #18202c;
+}
+
+.buttonRun
+{
+  min-width: 120px;
+  border: 1px solid #3b4252;
+  background-color: #1f2937;
+  color: #f9fafb;
+}
+
+.buttonRun:hover:not(:disabled)
+{
+  border-color: #6b7280;
+  background-color: #273244;
+}
+
+.buttonClearLogs
+{
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8rem;
+  border: 1px solid #3b4252;
+  background-color: #11151d;
+  color: #cbd5e1;
+}
+
+.buttonClearLogs:hover:not(:disabled)
+{
+  border-color: #6b7280;
+  background-color: #18202c;
+}

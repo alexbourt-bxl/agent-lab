@@ -37,33 +37,6 @@
   font-weight: 600;
 }
 
-.runButton
-{
-  min-width: 120px;
-  border: 1px solid #3b4252;
-  background-color: #1f2937;
-  color: #f9fafb;
-}
-
-.secondaryButton
-{
-  border: 1px solid #3b4252;
-  background-color: #11151d;
-  color: #cbd5e1;
-}
-
-.runButton:hover
-{
-  border-color: #6b7280;
-  background-color: #273244;
-}
-
-.secondaryButton:hover
-{
-  border-color: #6b7280;
-  background-color: #18202c;
-}
-
 .contentArea
 {
   display: flex;
@@ -140,14 +113,13 @@
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background-color: #2a2f3a;
   opacity: 0.9;
 }
 
 .verticalResizeHandle:hover::before,
 .horizontalResizeHandle:hover::before
 {
-  background-color: #3b82f6;
+  background-color: #2a2f3a;
 }
 
 @media (max-width: 900px)
@@ -169,12 +141,7 @@
     align-items: stretch;
   }
 
-  .runButton
-  {
-    width: 100%;
-  }
-
-  .secondaryButton
+  .topBarActions button
   {
     width: 100%;
   }

@@ -11,7 +11,7 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 DEFAULT_SETTINGS = {
     "provider": "ollama",
     "model": "qwen3:4b",
-    "timeout": 240.0,
+    "timeout": 300.0,
 }
 
 

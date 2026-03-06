@@ -13,6 +13,7 @@ import uvicorn
 from llm import list_available_ollama_models
 from runtime import Agent, Workflow, WorkflowRunner
 from storage import load_settings, save_settings
+from workflow_state import cancel_requested
 
 
 DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
@@ -100,6 +101,8 @@ async def emit_event(
     state: str | None = None,
     agent_name: str | None = None,
     round_number: int | None = None,
+    agent_order: list[str] | None = None,
+    session_id: str | None = None,
 ) -> None:
     payload = (
         {
@@ -119,6 +122,12 @@ async def emit_event(
     if round_number is not None:
         payload["round"] = round_number
 
+    if agent_order is not None:
+        payload["agentOrder"] = agent_order
+
+    if session_id is not None:
+        payload["sessionId"] = session_id
+
     await manager.broadcast(payload)
 
 
@@ -136,6 +145,19 @@ async def emit_agent_event(
         agent_name=agent_name,
         round_number=round_number,
     )
+
+
+async def emit_agent_output(agent_name: str, output: str) -> None:
+    payload: dict[str, Any] = (
+        {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "level": "info",
+            "eventType": "agent_output",
+            "agentName": agent_name,
+            "output": output,
+        }
+    )
+    await manager.broadcast(payload)
 
 
 @app.get("/health")
@@ -279,8 +301,18 @@ def extract_workflow_config(code: str) -> dict[str, Any] | None:
     }
 
 
+@app.post("/stop")
+async def stop_workflow() -> dict[str, str]:
+    cancel_requested.set()
+    return {
+        "status": "ok",
+        "message": "Stop requested.",
+    }
+
+
 @app.post("/run")
 async def run_agent(request: RunRequest) -> dict[str, str]:
+    cancel_requested.clear()
     # region agent log
     _debug_log(
         "H1",
@@ -402,6 +434,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
             round_number=0,
         )
 
+    agent_order = [config["name"] for config in selected_agent_configs]
     runner = WorkflowRunner(
         agents=agents,
         start_agent_name=start_agent_name,
@@ -419,12 +452,27 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
         },
     )
     # endregion
-    await runner.run()
+    import uuid
 
-    return {
-        "status": "ok",
-        "message": f"Workflow finished for {len(agents)} agent(s).",
-    }
+    from tools import set_workflow_session_id
+
+    session_id = uuid.uuid4().hex
+    set_workflow_session_id(session_id)
+    await emit_event(
+        event_type="workflow_started",
+        message="Workflow started.",
+        state="running",
+        agent_order=agent_order,
+        session_id=session_id,
+    )
+    try:
+        await runner.run()
+        return {
+            "status": "ok",
+            "message": f"Workflow finished for {len(agents)} agent(s).",
+        }
+    finally:
+        set_workflow_session_id(None)
 
 
 @app.websocket("/ws/logs")

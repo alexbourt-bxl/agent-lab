@@ -294,6 +294,7 @@ class Agent:
             "Only set done to true when your own goal is fully satisfied. If another agent still needs to revise work, keep done false.\n"
             "Use the available tools when they help complete the goal.\n"
             "If the goal involves creating a file, use write_file_tool and prefer markdown filenames. Relative filenames are written into the results directory.\n"
+            "Always write your final deliverable to the results folder (e.g. output.md, refined_idea.md) before setting done to true, so the output is visible in the UI.\n"
             "Prefer responding with a JSON block inside ```json fences using this shape:\n"
             "```json\n"
             "{\n"
@@ -458,22 +459,39 @@ class WorkflowRunner:
         self.max_rounds = max_rounds
         self.connections = connections or {}
 
+    def _format_elapsed(self, seconds: float) -> str:
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+
+        return f"{m}:{s:02d}"
+
     async def run(self, model: str | None = None) -> None:
+        import time
+
         from main import emit_agent_event, emit_event
+        from workflow_state import cancel_requested
 
         if not self.agent_order:
             return
 
-        await emit_event(
-            event_type="system",
-            message="Workflow started.",
-            state="running",
-        )
+        workflow_start = time.perf_counter()
+
         await self._emit_initial_states()
 
         current_agent_name = self._resolve_start_agent_name()
 
         for round_number in range(1, self.max_rounds + 1):
+            if cancel_requested.is_set():
+                elapsed = time.perf_counter() - workflow_start
+
+                await emit_event(
+                    event_type="system",
+                    message=f"Workflow stopped by user ({self._format_elapsed(elapsed)}).",
+                    state="stopped",
+                    round_number=round_number - 1,
+                )
+                break
+
             current_agent = self.agents[current_agent_name]
             turn_result = await current_agent.execute_turn(
                 model=model,
@@ -483,6 +501,9 @@ class WorkflowRunner:
             )
 
             if turn_result["done"]:
+                from main import emit_agent_output
+
+                await emit_agent_output(current_agent.name, current_agent.output)
                 await emit_agent_event(
                     agent_name=current_agent.name,
                     event_type="state",
@@ -510,21 +531,27 @@ class WorkflowRunner:
             )
 
             if next_agent_name is None:
+                elapsed = time.perf_counter() - workflow_start
+
                 await emit_event(
                     event_type="system",
-                    message="Workflow stopped because no next agent was available.",
+                    message=f"Workflow stopped because no next agent was available ({self._format_elapsed(elapsed)}).",
                     state="done",
                     round_number=round_number,
                 )
                 break
 
             if next_agent_name != current_agent_name:
+                from main import emit_agent_output
+
                 handoff_record = self._build_handoff_record(
                     source_agent_name=current_agent.name,
                     target_agent_name=next_agent_name,
                     turn_result=turn_result,
                     round_number=round_number,
                 )
+                if current_agent.output:
+                    await emit_agent_output(current_agent.name, current_agent.output)
                 next_agent = self.agents[next_agent_name]
                 next_agent.receive_handoff(handoff_record)
 
@@ -545,9 +572,11 @@ class WorkflowRunner:
 
             current_agent_name = next_agent_name
         else:
+            elapsed = time.perf_counter() - workflow_start
+
             await emit_event(
                 event_type="system",
-                message="Workflow stopped after reaching the max round limit.",
+                message=f"Workflow stopped after reaching the max round limit ({self._format_elapsed(elapsed)}).",
                 state="done",
                 round_number=self.max_rounds,
             )

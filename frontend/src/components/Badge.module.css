@@ -1,5 +1,6 @@
 .badge
 {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -8,6 +9,21 @@
   padding: 0.2rem 0.65rem;
   font-size: 0.8rem;
   text-transform: capitalize;
+  overflow: hidden;
+}
+
+.badgeProgress
+{
+  position: absolute;
+  inset: 0;
+  width: calc(100% * var(--badge-progress, 0));
+  background: rgba(0, 128, 255, 0.3);
+  pointer-events: none;
+}
+
+.badgeElapsed
+{
+  opacity: 0.9;
 }
 
 .badgeSpinner
@@ -42,6 +58,12 @@
 {
   color: #4ade80;
   border-color: #22c55e;
+}
+
+.badgeError
+{
+  color: #f87171;
+  border-color: #dc2626;
 }
 
 @keyframes spin

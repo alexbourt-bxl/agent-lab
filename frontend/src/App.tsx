@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import CodeEditor from './components/CodeEditor';
+import { ArrowLeft, Play, Settings, Trash2 } from 'lucide-react';
+import { formatElapsedSeconds } from './utils/formatElapsed';
+import Button from './components/Button';
+import EditorPanel from './components/EditorPanel';
 import LogList from './components/LogList';
 import SettingsPage from './components/SettingsPage';
 import StatusView from './components/StatusView';
@@ -23,6 +26,7 @@ type AgentStatus =
   state: string;
   message: string;
   round?: number;
+  stepStartTime?: number;
 };
 
 const EDITOR_WIDTH_COOKIE_NAME = 'agent_lab_editor_width';
@@ -136,15 +140,35 @@ workflow = Workflow(
 workflow.run()`);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
+  const [agentOrder, setAgentOrder] = useState<string[]>([]);
+  const [agentOutputs, setAgentOutputs] = useState<Record<string, string>>({});
   const [workflowResult, setWorkflowResult] = useState<string | null>(null);
+  const [editorActiveTab, setEditorActiveTab] = useState('code');
+  const [isRunning, setIsRunning] = useState(false);
+  const [, setTick] = useState(0);
   const [editorWidthPercent, setEditorWidthPercent] = useState(() => readPercentageCookie(EDITOR_WIDTH_COOKIE_NAME, 62, 30, 70));
   const [logHeightPercent, setLogHeightPercent] = useState(() => readPercentageCookie(LOG_HEIGHT_COOKIE_NAME, 28, 18, 55));
+  const [timeoutSeconds, setTimeoutSeconds] = useState(240);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const workflowStartTimeRef = useRef<number | null>(null);
+
+  useEffect(() =>
+  {
+    void axios.get<{ timeout: number }>('http://localhost:8000/settings')
+      .then((res) => setTimeoutSeconds(res.data.timeout))
+      .catch(() => {});
+  }, []);
 
   const handleRunAgent = async () =>
   {
     setLogs([]);
     setAgentStatuses({});
+    setAgentOrder([]);
     setWorkflowResult(null);
+    setIsRunning(true);
+    workflowStartTimeRef.current = Date.now();
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
 
     // #region agent log
     debugLog('F1', 'run_agent_submit_start',
@@ -161,6 +185,9 @@ workflow.run()`);
       const response = await axios.post('http://localhost:8000/run',
       {
         code,
+      },
+      {
+        signal,
       });
 
       // #region agent log
@@ -173,40 +200,64 @@ workflow.run()`);
     }
     catch (error)
     {
-      if (axios.isAxiosError(error))
-      {
-        // #region agent log
-        debugLog('F2', 'run_agent_submit_axios_error',
-        {
-          message: error.message,
-          code: error.code,
-          status: error.response?.status,
-          responseData: error.response?.data,
-          hasRequest: error.request !== undefined,
-          backendUrl: 'http://localhost:8000/run',
-        });
-        // #endregion
-      }
-      else
-      {
-        // #region agent log
-        debugLog('F2', 'run_agent_submit_unknown_error',
-        {
-          error: String(error),
-          backendUrl: 'http://localhost:8000/run',
-        });
-        // #endregion
-      }
+      const isAborted = axios.isAxiosError(error) && error.code === 'ERR_CANCELED';
 
-      setLogs((currentLogs) => [
-        ...currentLogs,
+      if (!isAborted)
+      {
+        if (axios.isAxiosError(error))
         {
-          timestamp: new Date().toISOString(),
-          level: 'error',
-          message: 'Error: Failed to submit the agent script to the backend.',
-        },
-      ]);
+          // #region agent log
+          debugLog('F2', 'run_agent_submit_axios_error',
+          {
+            message: error.message,
+            code: error.code,
+            status: error.response?.status,
+            responseData: error.response?.data,
+            hasRequest: error.request !== undefined,
+            backendUrl: 'http://localhost:8000/run',
+          });
+          // #endregion
+        }
+        else
+        {
+          // #region agent log
+          debugLog('F2', 'run_agent_submit_unknown_error',
+          {
+            error: String(error),
+            backendUrl: 'http://localhost:8000/run',
+          });
+          // #endregion
+        }
+
+        setLogs((currentLogs) => [
+          ...currentLogs,
+          {
+            timestamp: new Date().toISOString(),
+            level: 'error',
+            message: 'Error: Failed to submit the agent script to the backend.',
+          },
+        ]);
+      }
     }
+    finally
+    {
+      setIsRunning(false);
+      workflowStartTimeRef.current = null;
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleStopWorkflow = async () =>
+  {
+    try
+    {
+      await axios.post('http://localhost:8000/stop');
+    }
+    catch
+    {
+      // Ignore stop errors; abort will still cancel the request
+    }
+    abortControllerRef.current?.abort();
   };
 
   useEffect(() =>
@@ -230,25 +281,59 @@ workflow.run()`);
         const logEntry = JSON.parse(event.data) as LogEntry;
         setLogs((currentLogs) => [...currentLogs, logEntry]);
 
+        if (logEntry.eventType === 'workflow_started' && 'agentOrder' in logEntry)
+        {
+          const order = (logEntry as { agentOrder?: string[] }).agentOrder;
+          if (Array.isArray(order))
+          {
+            setAgentOrder(order);
+          }
+        }
+
         if (logEntry.eventType === 'workflow_result')
         {
           setWorkflowResult(logEntry.message);
         }
 
+        if (logEntry.eventType === 'agent_output' && logEntry.agentName !== undefined && 'output' in logEntry)
+        {
+          const agentName = logEntry.agentName as string;
+          const output = String((logEntry as { output?: string }).output ?? '');
+
+          setAgentOutputs((prev) => ({ ...prev, [agentName]: output }));
+        }
+
         if (logEntry.agentName !== undefined && logEntry.state !== undefined)
         {
-          setAgentStatuses((currentStatuses) => (
-            {
-              ...currentStatuses,
-              [logEntry.agentName as string]:
+          const agentName = logEntry.agentName as string;
+          const newState = logEntry.state as string;
+          const isActiveStep = newState === 'thinking' || newState === 'working';
+
+          setAgentStatuses((currentStatuses) =>
+          {
+            const prev = currentStatuses[agentName];
+            const prevWasActive = prev?.state === 'thinking' || prev?.state === 'working';
+            const stepStartTime =
+              isActiveStep
+                ? (prevWasActive && prev?.stepStartTime !== undefined
+                  ? prev.stepStartTime
+                  : Date.now())
+                : undefined;
+
+            return (
               {
-                name: logEntry.agentName as string,
-                state: logEntry.state as string,
-                message: logEntry.message,
-                round: logEntry.round,
-              },
-            }
-          ));
+                ...currentStatuses,
+                [agentName]:
+                {
+                  name: agentName,
+                  state: newState,
+                  message: logEntry.message,
+                  round: logEntry.round,
+                  stepStartTime,
+                },
+              }
+            );
+          });
         }
       }
       catch
@@ -297,6 +382,28 @@ workflow.run()`);
   {
     writePercentageCookie(LOG_HEIGHT_COOKIE_NAME, logHeightPercent);
   }, [logHeightPercent]);
+
+  const hasActiveStep = Object.values(agentStatuses).some(
+    (s) => s.state === 'thinking' || s.state === 'working',
+  );
+  const isWorkflowActive = isRunning || hasActiveStep;
+
+  useEffect(() =>
+  {
+    if (!isWorkflowActive)
+    {
+      return;
+    }
+
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+
+    return () => clearInterval(id);
+  }, [isWorkflowActive]);
+
+  const workflowElapsedSeconds =
+    workflowStartTimeRef.current !== null
+      ? Math.floor((Date.now() - workflowStartTimeRef.current) / 1000)
+      : 0;
 
   useEffect(() =>
   {
@@ -391,31 +498,60 @@ workflow.run()`);
       <header className={styles.topBar}>
         <h1 className={styles.appTitle}>Agent Lab</h1>
         <div className={styles.topBarActions}>
-          <button className={styles.secondaryButton} type="button" onClick={() => navigateTo('/')}>
-            Workflow
-          </button>
-          <button className={styles.secondaryButton} type="button" onClick={() => navigateTo('/settings')}>
-            Settings
-          </button>
-          {pathname !== '/settings' && (
-            <button className={styles.runButton} type="button" onClick={handleRunAgent}>
-              Run Workflow
-            </button>
+          {pathname === '/settings' ? (
+            <Button variant="secondary" onClick={() => navigateTo('/')} icon={<ArrowLeft size={18} />}>
+              Back To Lab
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="run"
+                onClick={isWorkflowActive ? handleStopWorkflow : handleRunAgent}
+                icon={!isWorkflowActive ? <Play size={16} /> : undefined}
+                showSpinner={isWorkflowActive}
+                elapsedTime={isWorkflowActive ? formatElapsedSeconds(workflowElapsedSeconds) : undefined}
+              >
+                {isWorkflowActive ? 'Stop Workflow' : 'Run Workflow'}
+              </Button>
+              <Button
+                variant="clearLogs"
+                onClick={() => setLogs([])}
+                icon={<Trash2 size={18} />}
+                title="Clear Logs"
+              >
+                {''}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => navigateTo('/settings')}
+                icon={<Settings size={18} />}
+                title="Settings"
+              >
+                {''}
+              </Button>
+            </>
           )}
         </div>
       </header>
 
       {pathname === '/settings' ? (
         <div className={styles.contentArea}>
-          <SettingsPage onBack={() => navigateTo('/')} />
+          <SettingsPage />
         </div>
       ) : (
         <div className={styles.contentArea} ref={contentAreaRef}>
           <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
             <div className={styles.mainSplit} ref={mainSplitRef}>
               <section className={styles.panel} style={{ width: `calc(${editorWidthPercent}% - 4px)` }}>
-                <div className={styles.panelHeader}>Code Editor</div>
-                <CodeEditor code={code} onCodeChange={setCode} />
+                <EditorPanel
+                  code={code}
+                  onCodeChange={setCode}
+                  agentOutputs={agentOutputs}
+                  agentNames={agentOrder.length > 0 ? agentOrder : Object.keys(agentStatuses)}
+                  workflowResult={workflowResult}
+                  activeTab={editorActiveTab}
+                  onTabChange={setEditorActiveTab}
+                />
               </section>
 
               <div
@@ -427,10 +563,23 @@ workflow.run()`);
               />
 
               <section className={styles.panel} style={{ width: `calc(${100 - editorWidthPercent}% - 4px)` }}>
-                <div className={styles.panelHeader}>Status</div>
                 <StatusView
-                  agentStatuses={Object.values(agentStatuses)}
+                  agentStatuses={
+                    agentOrder.length > 0
+                      ? [
+                          ...agentOrder
+                            .filter((name) => agentStatuses[name] !== undefined)
+                            .map((name) => agentStatuses[name]),
+                          ...Object.values(agentStatuses).filter(
+                            (s) => !agentOrder.includes(s.name),
+                          ),
+                        ]
+                      : Object.values(agentStatuses)
+                  }
                   workflowResult={workflowResult}
+                  timeoutSeconds={timeoutSeconds}
+                  onShowAgentResults={(agentName) => setEditorActiveTab(`agent:${agentName}`)}
+                  onShowWorkflowResult={() => setEditorActiveTab('workflow-result')}
                 />
               </section>
             </div>
@@ -445,7 +594,7 @@ workflow.run()`);
           />
 
           <section className={`${styles.panel} ${styles.bottomPanel}`} style={{ height: `calc(${logHeightPercent}% - 4px)` }}>
-            <LogList logs={logs} onClearLogs={() => setLogs([])} />
+            <LogList logs={logs} />
           </section>
         </div>
       )}

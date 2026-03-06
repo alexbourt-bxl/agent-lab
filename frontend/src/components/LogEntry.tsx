@@ -82,7 +82,7 @@ function LogEntry(
       ? styles.logLevel
       : `${styles.logLevel} ${logLevelClassName}`;
 
-  const showsErrorStyle = level === 'error' || message.startsWith('Error:');
+  const showsErrorStyle = level === 'error' || message.includes('Error:');
 
   const logMessageClassName =
     showsErrorStyle
