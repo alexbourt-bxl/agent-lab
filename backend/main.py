@@ -1,5 +1,8 @@
 from datetime import datetime, UTC
+import json
+from pathlib import Path
 import re
+import time
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -8,6 +11,23 @@ from pydantic import BaseModel
 import uvicorn
 
 from runtime import Agent, Workflow, WorkflowRunner
+
+
+DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
+
+
+def _debug_log(hypothesis_id: str, message: str, data: dict[str, object]) -> None:
+    payload = {
+        "sessionId": "ecf5ab",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": "backend/main.py",
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    with DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
+        log_file.write(json.dumps(payload) + "\n")
 
 
 app = FastAPI()
@@ -201,9 +221,20 @@ def extract_workflow_config(code: str) -> dict[str, Any] | None:
 
 @app.post("/run")
 async def run_agent(request: RunRequest) -> dict[str, str]:
+    # region agent log
+    _debug_log(
+        "H1",
+        "run_agent_start",
+        {
+            "codeLength": len(request.code),
+            "hasWorkflowRun": "workflow.run()" in request.code,
+            "hasAgentOutputReference": ".output" in request.code,
+        },
+    )
+    # endregion
     agent_configs = extract_agent_configs(request.code)
     if not agent_configs:
-        await log_to_client("Failed to parse agent parameters from the submitted script.")
+        await log_to_client("Error: Failed to parse agent parameters from the submitted script.")
         return {
             "status": "error",
             "message": "Could not extract any Agent(name=..., goal=...) definitions from the script.",
@@ -211,7 +242,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
 
     workflow_config = extract_workflow_config(request.code)
     if workflow_config is None:
-        await log_to_client("Failed to parse workflow configuration from the submitted script.")
+        await log_to_client("Error: Failed to parse workflow configuration from the submitted script.")
         return {
             "status": "error",
             "message": "Could not extract Workflow(agents=[...], start_agent=..., max_rounds=...) plus workflow.run() from the script.",
@@ -316,6 +347,17 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
         max_rounds=workflow.max_rounds,
         connections=connections,
     )
+    # region agent log
+    _debug_log(
+        "H1",
+        "run_agent_parsed",
+        {
+            "agentCount": len(agents),
+            "startAgentName": start_agent_name,
+            "connections": connections,
+        },
+    )
+    # endregion
     await runner.run()
 
     return {

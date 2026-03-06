@@ -48,7 +48,6 @@
 {
   display: flex;
   flex-direction: column;
-  gap: 5px;
   font-family: 'Cascadia Code', 'Consolas', monospace;
   font-size: 0.9rem;
 }

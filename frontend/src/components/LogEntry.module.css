@@ -4,10 +4,8 @@
   grid-template-columns: 140px 100px 1fr;
   gap: 12px;
   align-items: start;
-  padding: 5px 12px;
-  border: 1px solid #2a2f3a;
+  padding: 0px 12px;
   border-radius: 10px;
-  background-color: #11151d;
 }
 
 .logEntryThought
@@ -65,6 +63,11 @@
 {
   color: #e5e7eb;
   word-break: break-word;
+}
+
+.logMessageError
+{
+  color: #f87171;
 }
 
 @media (max-width: 900px)

@@ -20,40 +20,6 @@
   color: #e5e7eb;
 }
 
-.agentStatusBadge
-{
-  border: 1px solid #3b4252;
-  border-radius: 999px;
-  padding: 0.2rem 0.65rem;
-  font-size: 0.8rem;
-  text-transform: capitalize;
-}
-
-.agentStatusThinking
-{
-  color: #60a5fa;
-  border-color: #2563eb;
-}
-
-.agentStatusWorking
-{
-  color: #facc15;
-  border-color: #eab308;
-}
-
-.agentStatusWaitingForTurn,
-.agentStatusWaitingForPeer
-{
-  color: #cbd5e1;
-  border-color: #475569;
-}
-
-.agentStatusDone
-{
-  color: #4ade80;
-  border-color: #22c55e;
-}
-
 .agentStatusMessage
 {
   margin-top: 10px;

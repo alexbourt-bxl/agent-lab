@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import CodeEditor from './components/CodeEditor';
 import LogList from './components/LogList';
@@ -24,8 +24,79 @@ type AgentStatus =
   round?: number;
 };
 
+const EDITOR_WIDTH_COOKIE_NAME = 'agent_lab_editor_width';
+const LOG_HEIGHT_COOKIE_NAME = 'agent_lab_log_height';
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+function clampPercentage(value: number, minimum: number, maximum: number): number
+{
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function readPercentageCookie(
+  name: string,
+  fallbackValue: number,
+  minimum: number,
+  maximum: number,
+): number
+{
+  if (typeof document === 'undefined')
+  {
+    return fallbackValue;
+  }
+
+  const cookieEntry = document.cookie
+    .split('; ')
+    .find((entry) => entry.startsWith(`${name}=`));
+
+  if (cookieEntry === undefined)
+  {
+    return fallbackValue;
+  }
+
+  const storedValue = Number(cookieEntry.split('=').slice(1).join('='));
+  if (Number.isNaN(storedValue))
+  {
+    return fallbackValue;
+  }
+
+  return clampPercentage(storedValue, minimum, maximum);
+}
+
+function writePercentageCookie(name: string, value: number): void
+{
+  document.cookie = `${name}=${value}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; samesite=lax`;
+}
+
+function debugLog(hypothesisId: string, message: string, data: Record<string, unknown>): void
+{
+  // #region agent log
+  fetch('http://127.0.0.1:7841/ingest/7bddab68-8e02-4480-82d9-70b8500c49f1',
+  {
+    method: 'POST',
+    headers:
+    {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': 'ecf5ab',
+    },
+    body: JSON.stringify(
+    {
+      sessionId: 'ecf5ab',
+      runId: 'pre-fix',
+      hypothesisId,
+      location: 'frontend/src/App.tsx',
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+}
+
 function App()
 {
+  const contentAreaRef = useRef<HTMLDivElement | null>(null);
+  const mainSplitRef = useRef<HTMLDivElement | null>(null);
   const [code, setCode] = useState(`researcher = Agent(
     name="Researcher", 
     goal="Find and refine a promising SaaS idea based on analyst feedback",
@@ -51,27 +122,74 @@ workflow = Workflow(
 workflow.run()`);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
+  const [workflowResult, setWorkflowResult] = useState<string | null>(null);
+  const [editorWidthPercent, setEditorWidthPercent] = useState(() => readPercentageCookie(EDITOR_WIDTH_COOKIE_NAME, 62, 30, 70));
+  const [logHeightPercent, setLogHeightPercent] = useState(() => readPercentageCookie(LOG_HEIGHT_COOKIE_NAME, 28, 18, 55));
 
   const handleRunAgent = async () =>
   {
     setLogs([]);
     setAgentStatuses({});
+    setWorkflowResult(null);
+
+    // #region agent log
+    debugLog('F1', 'run_agent_submit_start',
+    {
+      frontendOrigin: window.location.origin,
+      backendUrl: 'http://localhost:8000/run',
+      codeLength: code.length,
+      online: navigator.onLine,
+    });
+    // #endregion
 
     try
     {
-      await axios.post('http://localhost:8000/run',
+      const response = await axios.post('http://localhost:8000/run',
       {
         code,
       });
+
+      // #region agent log
+      debugLog('F1', 'run_agent_submit_success',
+      {
+        status: response.status,
+        data: response.data,
+      });
+      // #endregion
     }
-    catch
+    catch (error)
     {
+      if (axios.isAxiosError(error))
+      {
+        // #region agent log
+        debugLog('F2', 'run_agent_submit_axios_error',
+        {
+          message: error.message,
+          code: error.code,
+          status: error.response?.status,
+          responseData: error.response?.data,
+          hasRequest: error.request !== undefined,
+          backendUrl: 'http://localhost:8000/run',
+        });
+        // #endregion
+      }
+      else
+      {
+        // #region agent log
+        debugLog('F2', 'run_agent_submit_unknown_error',
+        {
+          error: String(error),
+          backendUrl: 'http://localhost:8000/run',
+        });
+        // #endregion
+      }
+
       setLogs((currentLogs) => [
         ...currentLogs,
         {
           timestamp: new Date().toISOString(),
           level: 'error',
-          message: 'Failed to submit the agent script to the backend.',
+          message: 'Error: Failed to submit the agent script to the backend.',
         },
       ]);
     }
@@ -81,12 +199,27 @@ workflow.run()`);
   {
     const socket = new WebSocket('ws://localhost:8000/ws/logs');
 
+    socket.onopen = () =>
+    {
+      // #region agent log
+      debugLog('F3', 'logs_socket_open',
+      {
+        socketUrl: 'ws://localhost:8000/ws/logs',
+      });
+      // #endregion
+    };
+
     socket.onmessage = (event) =>
     {
       try
       {
         const logEntry = JSON.parse(event.data) as LogEntry;
         setLogs((currentLogs) => [...currentLogs, logEntry]);
+
+        if (logEntry.eventType === 'workflow_result')
+        {
+          setWorkflowResult(logEntry.message);
+        }
 
         if (logEntry.agentName !== undefined && logEntry.state !== undefined)
         {
@@ -119,6 +252,12 @@ workflow.run()`);
 
     socket.onerror = () =>
     {
+      // #region agent log
+      debugLog('F3', 'logs_socket_error',
+      {
+        socketUrl: 'ws://localhost:8000/ws/logs',
+      });
+      // #endregion
       setLogs((currentLogs) => [
         ...currentLogs,
         {
@@ -135,6 +274,78 @@ workflow.run()`);
     };
   }, []);
 
+  useEffect(() =>
+  {
+    writePercentageCookie(EDITOR_WIDTH_COOKIE_NAME, editorWidthPercent);
+  }, [editorWidthPercent]);
+
+  useEffect(() =>
+  {
+    writePercentageCookie(LOG_HEIGHT_COOKIE_NAME, logHeightPercent);
+  }, [logHeightPercent]);
+
+  const handleVerticalResizeStart = (event: React.PointerEvent<HTMLDivElement>) =>
+  {
+    const mainSplit = mainSplitRef.current;
+    if (mainSplit === null)
+    {
+      return;
+    }
+
+    event.preventDefault();
+    const rect = mainSplit.getBoundingClientRect();
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    const handlePointerMove = (moveEvent: PointerEvent) =>
+    {
+      const nextWidthPercent = ((moveEvent.clientX - rect.left) / rect.width) * 100;
+      setEditorWidthPercent(clampPercentage(nextWidthPercent, 30, 70));
+    };
+
+    const handlePointerUp = () =>
+    {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
+  const handleHorizontalResizeStart = (event: React.PointerEvent<HTMLDivElement>) =>
+  {
+    const contentArea = contentAreaRef.current;
+    if (contentArea === null)
+    {
+      return;
+    }
+
+    event.preventDefault();
+    const rect = contentArea.getBoundingClientRect();
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+
+    const handlePointerMove = (moveEvent: PointerEvent) =>
+    {
+      const bottomHeightPercent = ((rect.bottom - moveEvent.clientY) / rect.height) * 100;
+      setLogHeightPercent(clampPercentage(bottomHeightPercent, 18, 55));
+    };
+
+    const handlePointerUp = () =>
+    {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
   return (
     <div className={styles.appShell}>
       <header className={styles.topBar}>
@@ -144,21 +355,44 @@ workflow.run()`);
         </button>
       </header>
 
-      <main className={styles.mainContent}>
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>Code Editor</div>
-          <CodeEditor code={code} onCodeChange={setCode} />
-        </section>
+      <div className={styles.contentArea} ref={contentAreaRef}>
+        <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
+          <div className={styles.mainSplit} ref={mainSplitRef}>
+            <section className={styles.panel} style={{ width: `calc(${editorWidthPercent}% - 4px)` }}>
+              <div className={styles.panelHeader}>Code Editor</div>
+              <CodeEditor code={code} onCodeChange={setCode} />
+            </section>
 
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>Visualization/Status</div>
-          <StatusView agentStatuses={Object.values(agentStatuses)} />
-        </section>
-      </main>
+            <div
+              className={styles.verticalResizeHandle}
+              onPointerDown={handleVerticalResizeStart}
+              role="separator"
+              aria-label="Resize editor and status panels"
+              aria-orientation="vertical"
+            />
 
-      <section className={`${styles.panel} ${styles.bottomPanel}`}>
-        <LogList logs={logs} onClearLogs={() => setLogs([])} />
-      </section>
+            <section className={styles.panel} style={{ width: `calc(${100 - editorWidthPercent}% - 4px)` }}>
+              <div className={styles.panelHeader}>Status</div>
+              <StatusView
+                agentStatuses={Object.values(agentStatuses)}
+                workflowResult={workflowResult}
+              />
+            </section>
+          </div>
+        </div>
+
+        <div
+          className={styles.horizontalResizeHandle}
+          onPointerDown={handleHorizontalResizeStart}
+          role="separator"
+          aria-label="Resize logs panel"
+          aria-orientation="horizontal"
+        />
+
+        <section className={`${styles.panel} ${styles.bottomPanel}`} style={{ height: `calc(${logHeightPercent}% - 4px)` }}>
+          <LogList logs={logs} onClearLogs={() => setLogs([])} />
+        </section>
+      </div>
     </div>
   );
 }

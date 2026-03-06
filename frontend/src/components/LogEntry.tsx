@@ -15,6 +15,7 @@ const timestampFormatter = new Intl.DateTimeFormat('en-GB',
 type LogEntryProps =
 {
   timestamp: string;
+  level: string;
   logLabel: string;
   message: string;
   logVariant: LogVariant;
@@ -47,6 +48,7 @@ function formatTimestamp(timestamp: string): string
 function LogEntry(
 {
   timestamp,
+  level,
   logLabel,
   message,
   logVariant,
@@ -80,11 +82,18 @@ function LogEntry(
       ? styles.logLevel
       : `${styles.logLevel} ${logLevelClassName}`;
 
+  const showsErrorStyle = level === 'error' || message.startsWith('Error:');
+
+  const logMessageClassName =
+    showsErrorStyle
+      ? `${styles.logMessage} ${styles.logMessageError}`
+      : styles.logMessage;
+
   return (
     <div className={logEntryClassName}>
       <span className={styles.logTimestamp}>{formatTimestamp(timestamp)}</span>
       <span className={logLabelClassName}>{logLabel}</span>
-      <span className={styles.logMessage}>{message}</span>
+      <span className={logMessageClassName}>{message}</span>
     </div>
   );
 }

@@ -1,12 +1,14 @@
 .appShell
 {
   display: grid;
-  grid-template-rows: auto 1fr minmax(140px, 22vh);
+  grid-template-rows: auto 1fr;
   gap: 16px;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   padding: 20px;
   background-color: #0f1117;
   color: #e5e7eb;
+  overflow: hidden;
 }
 
 .topBar
@@ -42,12 +44,28 @@
   background-color: #273244;
 }
 
-.mainContent
+.contentArea
 {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 16px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-height: 0;
+  overflow: hidden;
+}
+
+.mainArea
+{
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mainSplit
+{
+  display: flex;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .panel
@@ -72,14 +90,51 @@
 
 .bottomPanel
 {
-  min-height: 140px;
+  min-height: 0;
+}
+
+.verticalResizeHandle,
+.horizontalResizeHandle
+{
+  position: relative;
+  flex: none;
+  background-color: transparent;
+}
+
+.verticalResizeHandle
+{
+  width: 8px;
+  cursor: col-resize;
+}
+
+.horizontalResizeHandle
+{
+  height: 8px;
+  cursor: row-resize;
+}
+
+.verticalResizeHandle::before,
+.horizontalResizeHandle::before
+{
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background-color: #2a2f3a;
+  opacity: 0.9;
+}
+
+.verticalResizeHandle:hover::before,
+.horizontalResizeHandle:hover::before
+{
+  background-color: #3b82f6;
 }
 
 @media (max-width: 900px)
 {
-  .mainContent
+  .mainSplit
   {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 
   .topBar
@@ -91,5 +146,10 @@
   .runButton
   {
     width: 100%;
+  }
+
+  .verticalResizeHandle
+  {
+    display: none;
   }
 }

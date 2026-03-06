@@ -1,10 +1,29 @@
 import json
+from pathlib import Path
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
 from llm import OllamaInterface
 from tools import read_file_tool, write_file_tool
+
+
+DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
+
+
+def _debug_log(hypothesis_id: str, message: str, data: dict[str, object]) -> None:
+    payload = {
+        "sessionId": "ecf5ab",
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": "backend/runtime.py",
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    with DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
+        log_file.write(json.dumps(payload) + "\n")
 
 
 class Tool:
@@ -56,14 +75,14 @@ class Agent:
         self.register_tool(
             Tool(
                 name="read_file_tool",
-                description="Read the contents of a file by filename.",
+                description="Read the contents of a markdown file from the results directory by filename.",
                 handler=read_file_tool,
             )
         )
         self.register_tool(
             Tool(
                 name="write_file_tool",
-                description="Write content to a file by filename.",
+                description="Write content to a markdown file in the results directory by filename.",
                 handler=write_file_tool,
             )
         )
@@ -110,6 +129,19 @@ class Agent:
             round_number=round_number,
         )
 
+        # region agent log
+        _debug_log(
+            "H5",
+            "execute_turn_start",
+            {
+                "agentName": self.name,
+                "roundNumber": round_number,
+                "inputSource": self.input_source,
+                "hasInput": self.input is not None and self.input != "",
+                "memorySize": len(self.memory),
+            },
+        )
+        # endregion
         prompt = self._build_prompt(
             available_agents=available_agents or
             [
@@ -144,6 +176,24 @@ class Agent:
             )
 
         self.output = self._build_output_value(thought=thought, tool_result=tool_result)
+        # region agent log
+        _debug_log(
+            "H6",
+            "agent_output_built",
+            {
+                "agentName": self.name,
+                "roundNumber": round_number,
+                "outputSource": (
+                    "tool_result"
+                    if isinstance(tool_result, str) and tool_result != ""
+                    else "thought"
+                ),
+                "outputPreview": self.output[:220],
+                "toolResultPreview": tool_result[:220] if isinstance(tool_result, str) else None,
+                "thoughtPreview": thought[:220],
+            },
+        )
+        # endregion
 
         return {
             "done": self._should_stop(
@@ -182,6 +232,24 @@ class Agent:
             if isinstance(output_value, str) and output_value != "":
                 self.input = output_value
 
+            # region agent log
+            _debug_log(
+                "H7",
+                "handoff_ingested",
+                {
+                    "agentName": self.name,
+                    "fromAgent": str(handoff_record.get("fromAgent", "")),
+                    "summaryPreview": str(handoff_record.get("summary", ""))[:220],
+                    "toolResultPreview": (
+                        str(handoff_record.get("toolResult", ""))[:220]
+                        if handoff_record.get("toolResult") is not None
+                        else None
+                    ),
+                    "outputPreview": str(handoff_record.get("output", ""))[:220],
+                    "assignedInputPreview": self.input[:220] if isinstance(self.input, str) else None,
+                },
+            )
+            # endregion
             self.add_to_memory(self._format_handoff_record(handoff_record))
 
         self.inbox.clear()
@@ -214,15 +282,15 @@ class Agent:
             "If your role is to review, critique, or analyze another agent's output, identify faults clearly and hand the work back until you are satisfied.\n"
             "Only set done to true when your own goal is fully satisfied. If another agent still needs to revise work, keep done false.\n"
             "Use the available tools when they help complete the goal.\n"
-            "If the goal involves creating a file, use write_file_tool.\n"
+            "If the goal involves creating a file, use write_file_tool and prefer markdown filenames. Relative filenames are written into the results directory.\n"
             "Prefer responding with a JSON block inside ```json fences using this shape:\n"
             "```json\n"
             "{\n"
             '  "thought": "Short reasoning about the next step.",\n'
             '  "tool": "write_file_tool",\n'
             '  "arguments": {\n'
-            '    "filename": "hello_world.txt",\n'
-            '    "content": "Hello, world!\\n"\n'
+            '    "filename": "hello_world.md",\n'
+            '    "content": "# Hello\\n\\nHello, world!\\n"\n'
             "  },\n"
             '  "next_agent": "Analyst",\n'
             '  "done": false\n'
@@ -409,6 +477,12 @@ class WorkflowRunner:
                     event_type="state",
                     state="done",
                     message=f"{current_agent.name} completed the workflow.",
+                    round_number=round_number,
+                )
+                await emit_event(
+                    event_type="workflow_result",
+                    message=current_agent.output,
+                    state="done",
                     round_number=round_number,
                 )
                 await emit_event(

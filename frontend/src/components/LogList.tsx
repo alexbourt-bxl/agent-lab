@@ -31,6 +31,11 @@ function getLogVariant(logEntry: LogEntryRecord): LogVariant
     return 'result';
   }
 
+  if (logEntry.eventType === 'workflow_result')
+  {
+    return 'result';
+  }
+
   if (logEntry.eventType === 'thought')
   {
     return 'thought';
@@ -86,6 +91,7 @@ function LogList(
                 <LogEntry
                   key={`${logEntry.timestamp}-${index}`}
                   timestamp={logEntry.timestamp}
+                  level={logEntry.level}
                   logLabel={logLabel}
                   message={logEntry.message}
                   logVariant={logVariant}

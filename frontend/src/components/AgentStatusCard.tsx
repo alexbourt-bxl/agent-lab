@@ -1,3 +1,4 @@
+import Badge, { type BadgeTone } from './Badge';
 import styles from './AgentStatusCard.module.css';
 
 type AgentStatusCardProps =
@@ -18,25 +19,22 @@ function AgentStatusCard(
   stateLabel,
 }: AgentStatusCardProps)
 {
-  const stateClassName =
+  const showsSpinner = state === 'thinking' || state === 'working';
+  const badgeToneByState: Record<string, BadgeTone> =
   {
-    thinking: styles.agentStatusThinking,
-    working: styles.agentStatusWorking,
-    waiting_for_turn: styles.agentStatusWaitingForTurn,
-    waiting_for_peer: styles.agentStatusWaitingForPeer,
-    done: styles.agentStatusDone,
-  }[state] ?? '';
-
-  const badgeClassName =
-    stateClassName === ''
-      ? styles.agentStatusBadge
-      : `${styles.agentStatusBadge} ${stateClassName}`;
+    thinking: 'thinking',
+    working: 'working',
+    waiting_for_turn: 'waiting',
+    waiting_for_peer: 'waiting',
+    done: 'done',
+  };
+  const badgeTone = badgeToneByState[state] ?? 'default';
 
   return (
     <div className={styles.agentStatusCard}>
       <div className={styles.agentStatusRow}>
         <span className={styles.agentStatusName}>{name}</span>
-        <span className={badgeClassName}>{stateLabel}</span>
+        <Badge label={stateLabel} tone={badgeTone} showSpinner={showsSpinner} />
       </div>
       <div className={styles.agentStatusMessage}>{message}</div>
       {round !== undefined && (
