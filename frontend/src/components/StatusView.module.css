@@ -1,0 +1,22 @@
+.panelBody
+{
+  flex: 1;
+  padding: 16px;
+  min-height: 0;
+}
+
+.panelPlaceholder
+{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.agentStatusList
+{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

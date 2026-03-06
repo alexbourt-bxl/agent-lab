@@ -1,0 +1,68 @@
+.panelHeader
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2a2f3a;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.panelBody
+{
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  scroll-behavior: smooth;
+}
+
+.panelPlaceholder
+{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.clearLogsButton
+{
+  border: 1px solid #3b4252;
+  background-color: #11151d;
+  color: #cbd5e1;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.clearLogsButton:hover
+{
+  border-color: #6b7280;
+  background-color: #18202c;
+}
+
+.logList
+{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px)
+{
+  .panelHeader
+  {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .clearLogsButton
+  {
+    width: 100%;
+  }
+}

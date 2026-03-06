@@ -2,6 +2,16 @@ import styles from './LogEntry.module.css';
 
 type LogVariant = 'thought' | 'tool-call' | 'result' | 'state' | 'default';
 
+const timestampFormatter = new Intl.DateTimeFormat('en-GB',
+{
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
 type LogEntryProps =
 {
   timestamp: string;
@@ -9,6 +19,30 @@ type LogEntryProps =
   message: string;
   logVariant: LogVariant;
 };
+
+function formatTimestamp(timestamp: string): string
+{
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime()))
+  {
+    return timestamp;
+  }
+
+  const parts = timestampFormatter.formatToParts(date);
+  const day = parts.find((part) => part.type === 'day')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const hours = parts.find((part) => part.type === 'hour')?.value;
+  const minutes = parts.find((part) => part.type === 'minute')?.value;
+  const seconds = parts.find((part) => part.type === 'second')?.value;
+
+  if (day === undefined || month === undefined || hours === undefined || minutes === undefined || seconds === undefined)
+  {
+    return timestamp;
+  }
+
+  return `${day}-${month} ${hours}:${minutes}:${seconds}`;
+}
 
 function LogEntry(
 {
@@ -48,7 +82,7 @@ function LogEntry(
 
   return (
     <div className={logEntryClassName}>
-      <span className={styles.logTimestamp}>{timestamp}</span>
+      <span className={styles.logTimestamp}>{formatTimestamp(timestamp)}</span>
       <span className={logLabelClassName}>{logLabel}</span>
       <span className={styles.logMessage}>{message}</span>
     </div>

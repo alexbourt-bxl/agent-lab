@@ -70,81 +70,9 @@
   color: #cbd5e1;
 }
 
-.panelHeaderRow
-{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.panelBody
-{
-  flex: 1;
-  padding: 16px;
-  min-height: 0;
-}
-
-.panelPlaceholder
-{
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #94a3b8;
-  text-align: center;
-}
-
-.editorPanelBody
-{
-  padding: 0;
-}
-
-.editorShell
-{
-  height: 100%;
-  min-height: 360px;
-}
-
-.agentStatusList
-{
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .bottomPanel
 {
   min-height: 140px;
-}
-
-.clearLogsButton
-{
-  border: 1px solid #3b4252;
-  background-color: #11151d;
-  color: #cbd5e1;
-  padding: 0.45rem 0.8rem;
-  font-size: 0.8rem;
-}
-
-.clearLogsButton:hover
-{
-  border-color: #6b7280;
-  background-color: #18202c;
-}
-
-.logsPanelBody
-{
-  overflow: auto;
-  scroll-behavior: smooth;
-}
-
-.logList
-{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 0.9rem;
 }
 
 @media (max-width: 900px)
@@ -160,18 +88,7 @@
     align-items: stretch;
   }
 
-  .panelHeaderRow
-  {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .runButton
-  {
-    width: 100%;
-  }
-
-  .clearLogsButton
   {
     width: 100%;
   }

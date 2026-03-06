@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
-import Editor from '@monaco-editor/react';
-import AgentStatusCard from './components/AgentStatusCard';
-import LogEntry from './components/LogEntry';
+import CodeEditor from './components/CodeEditor';
+import LogList from './components/LogList';
+import StatusView from './components/StatusView';
 import styles from './App.module.css';
 
 type LogEntry =
@@ -24,38 +24,6 @@ type AgentStatus =
   round?: number;
 };
 
-type LogVariant = 'thought' | 'tool-call' | 'result' | 'state' | 'default';
-
-function getLogVariant(logEntry: LogEntry): LogVariant
-{
-  if (logEntry.eventType === 'tool_call')
-  {
-    return 'tool-call';
-  }
-
-  if (logEntry.eventType === 'tool_result')
-  {
-    return 'result';
-  }
-
-  if (logEntry.eventType === 'thought')
-  {
-    return 'thought';
-  }
-
-  if (logEntry.eventType === 'state' || logEntry.eventType === 'handoff')
-  {
-    return 'state';
-  }
-
-  return 'default';
-}
-
-function formatStateLabel(state: string): string
-{
-  return state.replaceAll('_', ' ');
-}
-
 function App()
 {
   const [code, setCode] = useState(`researcher = Agent(
@@ -74,14 +42,13 @@ workflow = Workflow(
     "researcher",
     "analyst",
   ],
-  entry_agent="researcher",
+  start_agent="researcher",
   max_rounds=8
 )
 
 workflow.run()`);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
-  const logPanelRef = useRef<HTMLDivElement | null>(null);
 
   const handleRunAgent = async () =>
   {
@@ -166,16 +133,6 @@ workflow.run()`);
     };
   }, []);
 
-  useEffect(() =>
-  {
-    if (logPanelRef.current === null)
-    {
-      return;
-    }
-
-    logPanelRef.current.scrollTop = logPanelRef.current.scrollHeight;
-  }, [logs]);
-
   return (
     <div className={styles.appShell}>
       <header className={styles.topBar}>
@@ -188,89 +145,17 @@ workflow.run()`);
       <main className={styles.mainContent}>
         <section className={styles.panel}>
           <div className={styles.panelHeader}>Editor</div>
-          <div className={`${styles.panelBody} ${styles.editorPanelBody}`}>
-            <div className={styles.editorShell}>
-              <Editor
-                defaultLanguage="python"
-                language="python"
-                theme="vs-dark"
-                value={code}
-                onChange={(value) => setCode(value ?? '')}
-                options={
-                {
-                  minimap:
-                  {
-                    enabled: false,
-                  },
-                  fontSize: 14,
-                  padding:
-                  {
-                    top: 16,
-                  },
-                  scrollBeyondLastLine: false,
-                }}
-              />
-            </div>
-          </div>
+          <CodeEditor code={code} onCodeChange={setCode} />
         </section>
 
         <section className={styles.panel}>
           <div className={styles.panelHeader}>Visualization/Status</div>
-          <div className={styles.panelBody}>
-            {Object.keys(agentStatuses).length === 0 ? (
-              <div className={styles.panelPlaceholder}>
-                Agent status will appear here during execution.
-              </div>
-            ) : (
-              <div className={styles.agentStatusList}>
-                {Object.values(agentStatuses).map((agentStatus) => (
-                  <AgentStatusCard
-                    key={agentStatus.name}
-                    name={agentStatus.name}
-                    state={agentStatus.state}
-                    message={agentStatus.message}
-                    round={agentStatus.round}
-                    stateLabel={formatStateLabel(agentStatus.state)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+          <StatusView agentStatuses={Object.values(agentStatuses)} />
         </section>
       </main>
 
       <section className={`${styles.panel} ${styles.bottomPanel}`}>
-        <div className={`${styles.panelHeader} ${styles.panelHeaderRow}`}>
-          <span>Execution Logs</span>
-          <button className={styles.clearLogsButton} type="button" onClick={() => setLogs([])}>
-            Clear Logs
-          </button>
-        </div>
-        <div className={`${styles.panelBody} ${styles.logsPanelBody}`} ref={logPanelRef}>
-          {logs.length === 0 ? (
-            <div className={styles.panelPlaceholder}>
-              Waiting for execution logs...
-            </div>
-          ) : (
-            <div className={styles.logList}>
-              {logs.map((logEntry, index) =>
-              {
-                const logVariant = getLogVariant(logEntry);
-                const logLabel = logEntry.agentName ?? logEntry.eventType ?? logEntry.level.toUpperCase();
-
-                return (
-                <LogEntry
-                  key={`${logEntry.timestamp}-${index}`}
-                  timestamp={logEntry.timestamp}
-                  logLabel={logLabel}
-                  message={logEntry.message}
-                  logVariant={logVariant}
-                />
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <LogList logs={logs} onClearLogs={() => setLogs([])} />
       </section>
     </div>
   );

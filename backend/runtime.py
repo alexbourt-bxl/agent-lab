@@ -23,11 +23,11 @@ class Workflow:
     def __init__(
         self,
         agents: list[str],
-        entry_agent: str | None = None,
+        start_agent: str | None = None,
         max_rounds: int = 5,
     ) -> None:
         self.agents = agents
-        self.entry_agent = entry_agent
+        self.start_agent = start_agent
         self.max_rounds = max_rounds
 
     def run(self) -> None:
@@ -75,7 +75,7 @@ class Agent:
             [
                 self,
             ],
-            entry_agent_name=self.name,
+            start_agent_name=self.name,
             max_rounds=max_iterations,
         )
         await runner.run(model=model)
@@ -95,7 +95,7 @@ class Agent:
             agent_name=self.name,
             event_type="state",
             state="thinking",
-            message=f"{self.name} is thinking.",
+            message=f"Thinking...",
             round_number=round_number,
         )
 
@@ -335,7 +335,7 @@ class WorkflowRunner:
     def __init__(
         self,
         agents: list[Agent],
-        entry_agent_name: str | None = None,
+        start_agent_name: str | None = None,
         max_rounds: int = 5,
     ) -> None:
         self.agents = (
@@ -350,7 +350,7 @@ class WorkflowRunner:
                 for agent in agents
             ]
         )
-        self.entry_agent_name = entry_agent_name or self.agent_order[0]
+        self.start_agent_name = start_agent_name or self.agent_order[0]
         self.max_rounds = max_rounds
 
     async def run(self, model: str = "qwen3:4b") -> None:
@@ -366,7 +366,7 @@ class WorkflowRunner:
         )
         await self._emit_initial_states()
 
-        current_agent_name = self._resolve_entry_agent_name()
+        current_agent_name = self._resolve_start_agent_name()
 
         for round_number in range(1, self.max_rounds + 1):
             current_agent = self.agents[current_agent_name]
@@ -453,9 +453,9 @@ class WorkflowRunner:
                 round_number=0,
             )
 
-    def _resolve_entry_agent_name(self) -> str:
-        if self.entry_agent_name in self.agents:
-            return self.entry_agent_name
+    def _resolve_start_agent_name(self) -> str:
+        if self.start_agent_name in self.agents:
+            return self.start_agent_name
 
         return self.agent_order[0]
 

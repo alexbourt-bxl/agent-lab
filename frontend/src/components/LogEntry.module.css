@@ -1,10 +1,10 @@
 .logEntry
 {
   display: grid;
-  grid-template-columns: 220px 72px 1fr;
+  grid-template-columns: 140px 100px 1fr;
   gap: 12px;
   align-items: start;
-  padding: 10px 12px;
+  padding: 5px 12px;
   border: 1px solid #2a2f3a;
   border-radius: 10px;
   background-color: #11151d;

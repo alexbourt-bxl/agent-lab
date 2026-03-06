@@ -23,8 +23,8 @@ class OllamaInterface:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(self.base_url, json=payload)
                 response.raise_for_status()
-        except httpx.RequestError:
-            return "Error: Ollama is not reachable."
+        except httpx.RequestError as error:
+            return f"Error: Ollama is not reachable. {error!s}"
         except httpx.HTTPStatusError as error:
             return f"Error: Ollama returned status {error.response.status_code}."
 

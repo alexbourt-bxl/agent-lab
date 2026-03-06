@@ -134,7 +134,7 @@ def extract_agent_configs(code: str) -> list[dict[str, str]]:
     ]
 
 
-def extract_entry_agent_variable(code: str) -> str | None:
+def extract_start_agent_variable(code: str) -> str | None:
     match = re.search(r'(?P<variable>\w+)\.loop\(', code)
     if match is None:
         return None
@@ -144,7 +144,7 @@ def extract_entry_agent_variable(code: str) -> str | None:
 
 def extract_workflow_config(code: str) -> dict[str, Any] | None:
     match = re.search(
-        r'(?P<variable>\w+)\s*=\s*Workflow\(\s*agents\s*=\s*\[(?P<agents>.*?)\]\s*,\s*entry_agent\s*=\s*["\'](?P<entry_agent>[^"\']+)["\']\s*,\s*max_rounds\s*=\s*(?P<max_rounds>\d+)\s*,?\s*\)',
+        r'(?P<variable>\w+)\s*=\s*Workflow\(\s*agents\s*=\s*\[(?P<agents>.*?)\]\s*,\s*start_agent\s*=\s*["\'](?P<start_agent>[^"\']+)["\']\s*,\s*max_rounds\s*=\s*(?P<max_rounds>\d+)\s*,?\s*\)',
         code,
         re.DOTALL,
     )
@@ -159,7 +159,7 @@ def extract_workflow_config(code: str) -> dict[str, Any] | None:
     agent_variables = re.findall(r'["\']([^"\']+)["\']', match.group("agents"))
     return {
         "agentVariables": agent_variables,
-        "entryAgent": match.group("entry_agent"),
+        "entryAgent": match.group("start_agent"),
         "maxRounds": int(match.group("max_rounds")),
     }
 
@@ -179,7 +179,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
         await log_to_client("Failed to parse workflow configuration from the submitted script.")
         return {
             "status": "error",
-            "message": "Could not extract Workflow(agents=[...], entry_agent=..., max_rounds=...) plus workflow.run() from the script.",
+            "message": "Could not extract Workflow(agents=[...], start_agent=..., max_rounds=...) plus workflow.run() from the script.",
         }
 
     variable_to_name = (
@@ -211,7 +211,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
 
     workflow = Workflow(
         agents=workflow_config["agentVariables"],
-        entry_agent=workflow_config["entryAgent"],
+        start_agent=workflow_config["entryAgent"],
         max_rounds=workflow_config["maxRounds"],
     )
     agents = (
@@ -220,7 +220,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
             for config in selected_agent_configs
         ]
     )
-    entry_agent_name = variable_to_name.get(workflow.entry_agent) if workflow.entry_agent else agents[0].name
+    start_agent_name = variable_to_name.get(workflow.start_agent) if workflow.start_agent else agents[0].name
 
     for agent in agents:
         agent.add_to_memory("Agent instantiated from submitted script.")
@@ -234,7 +234,7 @@ async def run_agent(request: RunRequest) -> dict[str, str]:
 
     runner = WorkflowRunner(
         agents=agents,
-        entry_agent_name=entry_agent_name,
+        start_agent_name=start_agent_name,
         max_rounds=workflow.max_rounds,
     )
     await runner.run()
