@@ -1,0 +1,178 @@
+.appShell
+{
+  display: grid;
+  grid-template-rows: auto 1fr minmax(140px, 22vh);
+  gap: 16px;
+  min-height: 100vh;
+  padding: 20px;
+  background-color: #0f1117;
+  color: #e5e7eb;
+}
+
+.topBar
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid #2a2f3a;
+  border-radius: 12px;
+  background-color: #151922;
+}
+
+.appTitle
+{
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.runButton
+{
+  min-width: 120px;
+  border: 1px solid #3b4252;
+  background-color: #1f2937;
+  color: #f9fafb;
+}
+
+.runButton:hover
+{
+  border-color: #6b7280;
+  background-color: #273244;
+}
+
+.mainContent
+{
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.panel
+{
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid #2a2f3a;
+  border-radius: 12px;
+  background-color: #151922;
+  overflow: hidden;
+}
+
+.panelHeader
+{
+  padding: 14px 16px;
+  border-bottom: 1px solid #2a2f3a;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.panelHeaderRow
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panelBody
+{
+  flex: 1;
+  padding: 16px;
+  min-height: 0;
+}
+
+.panelPlaceholder
+{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.editorPanelBody
+{
+  padding: 0;
+}
+
+.editorShell
+{
+  height: 100%;
+  min-height: 360px;
+}
+
+.agentStatusList
+{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bottomPanel
+{
+  min-height: 140px;
+}
+
+.clearLogsButton
+{
+  border: 1px solid #3b4252;
+  background-color: #11151d;
+  color: #cbd5e1;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.clearLogsButton:hover
+{
+  border-color: #6b7280;
+  background-color: #18202c;
+}
+
+.logsPanelBody
+{
+  overflow: auto;
+  scroll-behavior: smooth;
+}
+
+.logList
+{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px)
+{
+  .mainContent
+  {
+    grid-template-columns: 1fr;
+  }
+
+  .topBar
+  {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .panelHeaderRow
+  {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .runButton
+  {
+    width: 100%;
+  }
+
+  .clearLogsButton
+  {
+    width: 100%;
+  }
+}

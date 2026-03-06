@@ -1,0 +1,76 @@
+.logEntry
+{
+  display: grid;
+  grid-template-columns: 220px 72px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #2a2f3a;
+  border-radius: 10px;
+  background-color: #11151d;
+}
+
+.logEntryThought
+{
+  border-color: #2563eb;
+}
+
+.logEntryToolCall
+{
+  border-color: #eab308;
+}
+
+.logEntryResult
+{
+  border-color: #22c55e;
+}
+
+.logEntryState
+{
+  border-color: #64748b;
+}
+
+.logTimestamp
+{
+  color: #94a3b8;
+}
+
+.logLevel
+{
+  color: #60a5fa;
+  font-weight: 700;
+}
+
+.logLevelThought
+{
+  color: #60a5fa;
+}
+
+.logLevelToolCall
+{
+  color: #facc15;
+}
+
+.logLevelResult
+{
+  color: #4ade80;
+}
+
+.logLevelState
+{
+  color: #cbd5e1;
+}
+
+.logMessage
+{
+  color: #e5e7eb;
+  word-break: break-word;
+}
+
+@media (max-width: 900px)
+{
+  .logEntry
+  {
+    grid-template-columns: 1fr;
+  }
+}
