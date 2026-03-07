@@ -85,7 +85,6 @@ def _default_agent_snapshot(agent_name: str) -> dict[str, Any]:
         "round": 0,
         "lastResultFile": None,
         "resultFiles": [],
-        "output": "",
         "stepStartedAt": None,
         "updatedAt": now,
     }
@@ -193,7 +192,6 @@ def _ensure_agent_snapshot(snapshot: dict[str, Any], agent_name: str) -> dict[st
     agent_snapshot["name"] = agent_name
     agent_snapshot.setdefault("resultFiles", [])
     agent_snapshot.setdefault("lastResultFile", None)
-    agent_snapshot.setdefault("output", "")
     agent_snapshot.setdefault("stepStartedAt", None)
     agent_snapshot.setdefault("updatedAt", _utc_now())
     agent_snapshot.setdefault("round", 0)
@@ -282,12 +280,10 @@ def sync_workflow_event(
 
 def record_agent_output(
     agent_name: str,
-    output: str,
     session_id: str | None = None,
 ) -> None:
     def apply(snapshot: dict[str, Any]) -> None:
         agent_snapshot = _ensure_agent_snapshot(snapshot, agent_name)
-        agent_snapshot["output"] = output
         agent_snapshot["updatedAt"] = _utc_now()
         snapshot["currentAgent"] = agent_name
 
@@ -312,7 +308,6 @@ def record_result_file(
         result_files = agent_snapshot.setdefault("resultFiles", [])
         if filename not in result_files:
             result_files.append(filename)
-        agent_snapshot["output"] = content
         if resolved_round_number is not None:
             agent_snapshot["round"] = resolved_round_number
             snapshot["currentRound"] = resolved_round_number
@@ -329,6 +324,33 @@ def resolve_session_result_path(session_id: str, filename: str) -> Path:
 
     safe_filename = Path(filename).name
     return get_session_directory(resolved_session_id) / safe_filename
+
+
+SESSION_CODE_FILENAME = "code.py"
+
+
+def get_session_code_path(session_id: str | None = None) -> Path | None:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return None
+    return get_session_directory(resolved_session_id) / SESSION_CODE_FILENAME
+
+
+def write_session_code(code: str, session_id: str | None = None) -> None:
+    path = get_session_code_path(session_id)
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(code, encoding="utf-8")
+
+
+def read_session_code(session_id: str) -> str:
+    path = get_session_code_path(session_id)
+    if path is None:
+        raise FileNotFoundError("Session not found.")
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    return path.read_text(encoding="utf-8")
 
 
 def read_session_result_file(session_id: str, filename: str) -> str:

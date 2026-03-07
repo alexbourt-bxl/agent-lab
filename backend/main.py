@@ -16,11 +16,13 @@ from storage import load_settings, save_settings
 from tools import (
     get_workflow_session_id,
     initialize_workflow_session,
+    read_session_code,
     read_session_result_file,
     read_workflow_snapshot,
     record_agent_output,
     set_workflow_session_id,
     sync_workflow_event,
+    write_session_code,
 )
 from workflow_state import cancel_requested
 
@@ -92,6 +94,10 @@ manager = ConnectionManager()
 
 class RunRequest(BaseModel):
     code: str
+
+
+class SessionCodeUpdateRequest(BaseModel):
+    content: str
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -189,7 +195,7 @@ async def emit_agent_output(agent_name: str, output: str) -> None:
     if session_id is not None:
         payload["sessionId"] = session_id
 
-    record_agent_output(agent_name=agent_name, output=output, session_id=session_id)
+    record_agent_output(agent_name=agent_name, session_id=session_id)
     await manager.broadcast(payload)
 
 
@@ -230,6 +236,22 @@ async def get_workflow_session(session_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Session not found.")
 
     return snapshot
+
+
+@app.get("/sessions/{session_id}/code")
+async def get_session_code(session_id: str) -> dict[str, str]:
+    try:
+        content = read_session_code(session_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Session code not found.") from None
+
+    return {"content": content}
+
+
+@app.put("/sessions/{session_id}/code")
+async def put_session_code(session_id: str, request: SessionCodeUpdateRequest) -> dict[str, str]:
+    write_session_code(request.content, session_id)
+    return {"status": "ok"}
 
 
 @app.get("/sessions/{session_id}/results/{filename:path}")
@@ -514,6 +536,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
     session_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
     initialize_workflow_session(session_id, agent_order)
+    write_session_code(request.code, session_id)
 
     for agent in agents:
         agent.add_to_memory("Agent instantiated from submitted script.")

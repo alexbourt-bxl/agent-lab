@@ -38,7 +38,6 @@ type SessionAgentSnapshot =
   round?: number;
   lastResultFile?: string | null;
   resultFiles?: string[];
-  output?: string;
   stepStartedAt?: string | null;
 };
 
@@ -215,6 +214,8 @@ workflow.run()`);
   const closedSocketIdsRef = useRef<Set<string>>(new Set());
   const currentSessionIdRef = useRef<string | null>(currentSessionId);
   const sessionRefreshTimeoutRef = useRef<number | null>(null);
+  const codeRef = useRef<string>(code);
+  const lastSyncedCodeRef = useRef<string | null>(null);
 
   const persistCurrentSessionId = (sessionId: string | null) =>
   {
@@ -282,7 +283,7 @@ workflow.run()`);
           agentNames.map(async (agentName) =>
           {
             const agentSnapshot = snapshotAgents[agentName];
-            let output = agentSnapshot?.output ?? '';
+            let output = '';
 
             if (typeof agentSnapshot?.lastResultFile === 'string' && agentSnapshot.lastResultFile !== '')
             {
@@ -292,7 +293,7 @@ workflow.run()`);
               }
               catch
               {
-                output = agentSnapshot?.output ?? '';
+                output = '';
               }
             }
 
@@ -328,7 +329,25 @@ workflow.run()`);
           ? parsedStartedAt
           : null;
 
+      const isNewSession = currentSessionIdRef.current !== snapshot.sessionId;
       persistCurrentSessionId(snapshot.sessionId);
+
+      if (isNewSession)
+      {
+        try
+        {
+          const codeResponse = await axios.get<{ content: string }>(
+            `http://localhost:8000/sessions/${snapshot.sessionId}/code`,
+          );
+          const sessionCode = codeResponse.data.content ?? '';
+          setCode(sessionCode);
+          lastSyncedCodeRef.current = sessionCode;
+        }
+        catch
+        {
+          lastSyncedCodeRef.current = null;
+        }
+      }
     }
     catch (error)
     {
@@ -360,6 +379,47 @@ workflow.run()`);
   useEffect(() =>
   {
     currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() =>
+  {
+    codeRef.current = code;
+  }, [code]);
+
+  useEffect(() =>
+  {
+    if (currentSessionId === null)
+    {
+      return;
+    }
+
+    const intervalId = window.setInterval(() =>
+    {
+      const sessionId = currentSessionIdRef.current;
+      if (sessionId === null)
+      {
+        return;
+      }
+
+      const currentCode = codeRef.current;
+      const lastSynced = lastSyncedCodeRef.current;
+      if (currentCode === lastSynced)
+      {
+        return;
+      }
+
+      void axios.put(`http://localhost:8000/sessions/${sessionId}/code`,
+      {
+        content: currentCode,
+      })
+        .then(() =>
+        {
+          lastSyncedCodeRef.current = currentCode;
+        })
+        .catch(() => {});
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
   }, [currentSessionId]);
 
   useEffect(() =>
@@ -422,6 +482,7 @@ workflow.run()`);
 
       if (typeof response.data.sessionId === 'string' && response.data.sessionId !== '')
       {
+        lastSyncedCodeRef.current = code;
         await loadSession(response.data.sessionId);
       }
     }

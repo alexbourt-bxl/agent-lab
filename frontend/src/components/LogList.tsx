@@ -69,7 +69,7 @@ function LogList(
     <div className={styles.panelBody} ref={logPanelRef}>
         {logs.length === 0 ? (
           <div className={styles.panelPlaceholder}>
-            Waiting for execution logs...
+            No logs
           </div>
         ) : (
           <div className={styles.logList}>
