@@ -11,14 +11,16 @@ from pydantic import BaseModel
 import uvicorn
 
 from llm import OllamaInterface, list_available_ollama_models
-from runtime import Agent, Workflow, WorkflowRunner
+from agent import Agent
+from runtime import WorkflowRunner
 from tools import (
     create_session,
+    delete_session_file,
     get_session_settings,
+    list_session_files,
     get_workflow_run_id,
     get_workflow_session_id,
     initialize_workflow_session,
-    read_session_code,
     read_session_result_file,
     read_workflow_snapshot,
     record_agent_output,
@@ -27,6 +29,7 @@ from tools import (
     sync_workflow_event,
     update_session_settings,
     write_session_code,
+    write_session_file,
 )
 from workflow_state import cancel_requested
 
@@ -99,9 +102,10 @@ manager = ConnectionManager()
 class RunRequest(BaseModel):
     code: str
     sessionId: str
+    maxRounds: int | None = 8
 
 
-class SessionCodeUpdateRequest(BaseModel):
+class SessionFileUpdateRequest(BaseModel):
     content: str
 
 
@@ -252,6 +256,16 @@ async def get_session_settings_endpoint(session_id: str) -> dict[str, Any]:
     }
 
 
+@app.get("/sessions/{session_id}/files")
+async def get_session_files(session_id: str) -> dict[str, list[str]]:
+    try:
+        files = list_session_files(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session.") from None
+
+    return {"files": files}
+
+
 @app.get("/sessions/{session_id}/workflow")
 async def get_workflow_session(session_id: str) -> dict[str, Any]:
     snapshot = read_workflow_snapshot(session_id)
@@ -261,23 +275,7 @@ async def get_workflow_session(session_id: str) -> dict[str, Any]:
     return snapshot
 
 
-@app.get("/sessions/{session_id}/code")
-async def get_session_code(session_id: str) -> dict[str, str]:
-    try:
-        content = read_session_code(session_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Session code not found.") from None
-
-    return {"content": content}
-
-
-@app.put("/sessions/{session_id}/code")
-async def put_session_code(session_id: str, request: SessionCodeUpdateRequest) -> dict[str, str]:
-    write_session_code(request.content, session_id)
-    return {"status": "ok"}
-
-
-@app.get("/sessions/{session_id}/results/{filename:path}")
+@app.get("/sessions/{session_id}/{filename:path}")
 async def get_session_result_file(session_id: str, filename: str) -> dict[str, str]:
     try:
         content = read_session_result_file(session_id, filename)
@@ -290,6 +288,30 @@ async def get_session_result_file(session_id: str, filename: str) -> dict[str, s
         "filename": Path(filename).name,
         "content": content,
     }
+
+
+@app.put("/sessions/{session_id}/{filename:path}")
+async def put_session_file(
+    session_id: str,
+    filename: str,
+    request: SessionFileUpdateRequest,
+) -> dict[str, str]:
+    try:
+        write_session_file(session_id, filename, request.content)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session or filename.") from None
+
+    return {"status": "ok"}
+
+
+@app.delete("/sessions/{session_id}/{filename:path}")
+async def delete_session_file_endpoint(session_id: str, filename: str) -> dict[str, str]:
+    try:
+        delete_session_file(session_id, filename)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session or filename.") from None
+
+    return {"status": "ok"}
 
 
 @app.put("/sessions/{session_id}/settings")
@@ -360,63 +382,95 @@ def extract_input_source_variable(arguments: str) -> str | None:
     return match.group("source_variable")
 
 
-def extract_agent_configs(code: str) -> list[dict[str, str | None]]:
-    matches = re.finditer(
-        r'(?P<variable>\w+)\s*=\s*Agent\((?P<arguments>.*?)\)',
-        code,
-        re.DOTALL,
-    )
-    agent_configs: list[dict[str, str | None]] = []
+def _extract_class_attrs(
+    code: str,
+    start: int,
+    end: int,
+) -> dict[str, Any]:
+    from tools import TOOL_REGISTRY
 
-    for match in matches:
-        arguments = match.group("arguments")
-        name = extract_string_argument(arguments, "name")
-        goal = extract_string_argument(arguments, "goal")
+    body = code[start:end]
+    attrs: dict[str, Any] = {}
+    name_match = re.search(r'name\s*=\s*["\']([^"\']*)["\']', body)
+    role_match = re.search(r'role\s*=\s*["\']([^"\']*)["\']', body)
+    output_match = re.search(r'output\s*=\s*["\']([^"\']*)["\']', body)
+    tools_match = re.search(r"tools\s*=\s*\[([^\]]+)\]", body)
+    if name_match:
+        attrs["name"] = name_match.group(1)
+    if role_match:
+        attrs["role"] = role_match.group(1)
+    if output_match:
+        attrs["output"] = output_match.group(1)
+    if tools_match:
+        tool_names = [
+            t.strip() for t in tools_match.group(1).split(",")
+        ]
+        attrs["tools"] = [
+            TOOL_REGISTRY[t]
+            for t in tool_names
+            if t in TOOL_REGISTRY
+        ]
+    return attrs
 
-        if name is None or goal is None:
-            continue
 
-        agent_configs.append(
-            {
-                "variable": match.group("variable"),
-                "name": name,
-                "goal": goal,
-                "role": extract_string_argument(arguments, "role"),
-                "inputSourceVariable": extract_input_source_variable(arguments),
-            }
+def extract_agent_configs(code: str) -> list[dict[str, Any]]:
+    from tools import ReadFile, WriteFile
+
+    class_matches = list(re.finditer(r"class (\w+)\(Agent\):\s*", code))
+    classes_by_name: dict[str, dict[str, Any]] = {}
+
+    for i, match in enumerate(class_matches):
+        class_name = match.group(1)
+        body_start = match.end()
+        body_end = (
+            class_matches[i + 1].start()
+            if i + 1 < len(class_matches)
+            else len(code)
         )
+        next_class = re.search(r"\nclass \w+\(Agent\)", code[body_start:])
+        if next_class:
+            body_end = body_start + next_class.start()
+        attrs = _extract_class_attrs(code, body_start, body_end)
+        classes_by_name[class_name] = {
+            "name": attrs.get("name", class_name),
+            "role": attrs.get("role", ""),
+            "output": attrs.get("output", "{round}.md"),
+            "tools": attrs.get("tools", [ReadFile, WriteFile]),
+        }
 
-    return agent_configs
+    configs: list[dict[str, Any]] = []
+    for class_name in classes_by_name:
+        pattern = rf"(\w+)\s*=\s*{re.escape(class_name)}\s*\(\s*([^)]*)\)"
+        for m in re.finditer(pattern, code):
+            variable = m.group(1)
+            arguments = m.group(2)
+            goal = extract_string_argument(arguments, "goal")
+            if not goal:
+                continue
+            configs.append(
+                {
+                    "variable": variable,
+                    "className": class_name,
+                    "name": (
+                        str(classes_by_name[class_name]["name"]).strip()
+                        or class_name
+                    ),
+                    "role": str(classes_by_name[class_name]["role"] or ""),
+                    "output": str(classes_by_name[class_name].get("output", "{round}.md")),
+                    "goal": goal,
+                    "inputSourceVariable": extract_input_source_variable(
+                        arguments
+                    ),
+                    "tools": classes_by_name[class_name]["tools"],
+                }
+            )
+            break
 
+    def order_key(c: dict[str, Any]) -> int:
+        return code.index(f'{c["variable"]} = {c["className"]}')
 
-def extract_start_agent_variable(code: str) -> str | None:
-    match = re.search(r'(?P<variable>\w+)\.loop\(', code)
-    if match is None:
-        return None
-
-    return match.group("variable")
-
-
-def extract_workflow_config(code: str) -> dict[str, Any] | None:
-    match = re.search(
-        r'(?P<variable>\w+)\s*=\s*Workflow\(\s*agents\s*=\s*\[(?P<agents>.*?)\]\s*,\s*start_agent\s*=\s*["\'](?P<start_agent>[^"\']+)["\']\s*,\s*max_rounds\s*=\s*(?P<max_rounds>\d+)\s*,?\s*\)',
-        code,
-        re.DOTALL,
-    )
-    if match is None:
-        return None
-
-    workflow_variable = match.group("variable")
-    run_call_match = re.search(rf'{workflow_variable}\.run\(\s*\)', code)
-    if run_call_match is None:
-        return None
-
-    agent_variables = re.findall(r'["\']([^"\']+)["\']', match.group("agents"))
-    return {
-        "agentVariables": agent_variables,
-        "entryAgent": match.group("start_agent"),
-        "maxRounds": int(match.group("max_rounds")),
-    }
+    configs.sort(key=order_key)
+    return configs
 
 
 @app.post("/stop")
@@ -451,94 +505,70 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
         "run_agent_start",
         {
             "codeLength": len(request.code),
-            "hasWorkflowRun": "workflow.run()" in request.code,
-            "hasAgentOutputReference": ".output" in request.code,
             "sessionId": session_id,
         },
     )
     # endregion
     agent_configs = extract_agent_configs(request.code)
     if not agent_configs:
-        await log_to_client("Error: Failed to parse agent parameters from the submitted script.")
+        await log_to_client(
+            "Error: Failed to parse agent parameters from the submitted script."
+        )
         return {
             "status": "error",
-            "message": "Could not extract any Agent(name=..., goal=...) definitions from the script.",
+            "message": (
+                "Could not extract any class-based Agent definitions "
+                "(class X(Agent): ... variable = X(goal=..., input=...))."
+            ),
         }
 
-    workflow_config = extract_workflow_config(request.code)
-    if workflow_config is None:
-        await log_to_client("Error: Failed to parse workflow configuration from the submitted script.")
-        return {
-            "status": "error",
-            "message": "Could not extract Workflow(agents=[...], start_agent=..., max_rounds=...) plus workflow.run() from the script.",
-        }
+    variable_to_name = {
+        config["variable"]: config["name"] for config in agent_configs
+    }
+    variable_to_config = {
+        config["variable"]: config for config in agent_configs
+    }
 
-    variable_to_name = (
-        {
-            config["variable"]: config["name"]
-            for config in agent_configs
-        }
-    )
-    variable_to_config = (
-        {
-            config["variable"]: config
-            for config in agent_configs
-        }
-    )
-
-    selected_agent_configs = (
-        [
-            variable_to_config[agent_variable]
-            for agent_variable in workflow_config["agentVariables"]
-            if agent_variable in variable_to_config
-        ]
-    )
-    if not selected_agent_configs:
-        await log_to_client("Workflow did not reference any valid agent variables.")
-        return {
-            "status": "error",
-            "message": "The workflow must reference one or more defined agent variables.",
-        }
-
-    for config in selected_agent_configs:
+    for config in agent_configs:
         input_source_variable = config.get("inputSourceVariable")
 
         if input_source_variable is None:
             continue
 
         if input_source_variable not in variable_to_config:
-            await log_to_client("An agent input referenced an undefined upstream agent output.")
+            await log_to_client(
+                "An agent input referenced an undefined upstream agent output."
+            )
             return {
                 "status": "error",
-                "message": f"Agent '{config['variable']}' references undefined input source '{input_source_variable}.output'.",
+                "message": (
+                    f"Agent '{config['variable']}' references undefined "
+                    f"input source '{input_source_variable}.output'."
+                ),
             }
 
-    workflow = Workflow(
-        agents=workflow_config["agentVariables"],
-        start_agent=workflow_config["entryAgent"],
-        max_rounds=workflow_config["maxRounds"],
-    )
+    max_rounds = request.maxRounds if request.maxRounds is not None else 8
     session_settings = get_session_settings(session_id)
     llm_interface = OllamaInterface(settings=session_settings)
-    agents = (
-        [
-            Agent(
-                name=str(config["name"]),
-                goal=str(config["goal"]),
-                role=str(config.get("role") or ""),
-                input_source=(
-                    variable_to_name.get(str(config["inputSourceVariable"]))
-                    if config.get("inputSourceVariable") is not None
-                    else None
-                ),
-                llm=llm_interface,
-            )
-            for config in selected_agent_configs
-        ]
-    )
+    agents = [
+        Agent(
+            name=str(config["name"]),
+            goal=str(config["goal"]),
+            role=str(config.get("role") or ""),
+            output_file=str(config.get("output", "{round}.md")),
+            input_source=(
+                variable_to_name.get(str(config["inputSourceVariable"]))
+                if config.get("inputSourceVariable") is not None
+                else None
+            ),
+            llm=llm_interface,
+            tools=config.get("tools"),
+        )
+        for config in agent_configs
+    ]
     connections: dict[str, str] = {}
 
-    for config in selected_agent_configs:
+    for config in agent_configs:
         input_source_variable = config.get("inputSourceVariable")
 
         if input_source_variable is None:
@@ -550,21 +580,37 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
             continue
 
         if source_agent_name in connections:
-            await log_to_client("Multiple agents cannot consume the same output in this MVP.")
+            await log_to_client(
+                "Multiple agents cannot consume the same output in this MVP."
+            )
             return {
                 "status": "error",
-                "message": f"Output from '{source_agent_name}' is connected to multiple agents. This MVP supports a single downstream per output.",
+                "message": (
+                    f"Output from '{source_agent_name}' is connected to "
+                    "multiple agents. This MVP supports a single "
+                    "downstream per output."
+                ),
             }
 
         connections[source_agent_name] = target_agent_name
 
-    start_agent_name = variable_to_name.get(workflow.start_agent) if workflow.start_agent else agents[0].name
+    start_agent_name = (
+        next(
+            (
+                config["name"]
+                for config in agent_configs
+                if config.get("inputSourceVariable") is None
+            ),
+            None,
+        )
+        or agent_configs[0]["name"]
+    )
 
-    agent_order = [config["name"] for config in selected_agent_configs]
+    agent_order = [config["name"] for config in agent_configs]
     runner = WorkflowRunner(
         agents=agents,
         start_agent_name=start_agent_name,
-        max_rounds=workflow.max_rounds,
+        max_rounds=max_rounds,
         connections=connections,
     )
     # region agent log
@@ -583,7 +629,8 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
     run_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
     set_workflow_run_id(run_id)
-    initialize_workflow_session(session_id, agent_order, run_id=run_id)
+    agent_output_files = {c["name"]: c.get("output", "{round}.md") for c in agent_configs}
+    initialize_workflow_session(session_id, agent_order, run_id=run_id, agent_output_files=agent_output_files)
     write_session_code(request.code, session_id)
 
     for agent in agents:

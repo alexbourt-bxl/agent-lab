@@ -4,10 +4,12 @@ import { ArrowLeft, Play } from 'lucide-react';
 import { formatElapsedSeconds } from './utils/formatElapsed';
 import AppMenu from './components/AppMenu';
 import Button from './components/Button';
-import EditorPanel from './components/EditorPanel';
+import EditorPanel, {
+  extractAgentClassCode,
+  extractWorkflowCode,
+} from './components/EditorPanel';
 import LogList from './components/LogList';
 import SettingsPage from './components/SettingsPage';
-import StatusView from './components/StatusView';
 import styles from './App.module.css';
 
 type LogEntry =
@@ -64,36 +66,278 @@ type SessionResultResponse =
   content: string;
 };
 
-const EDITOR_WIDTH_COOKIE_NAME = 'agent_lab_editor_width';
 const LOG_HEIGHT_COOKIE_NAME = 'agent_lab_log_height';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const CURRENT_SESSION_ID_STORAGE_KEY = 'agent_lab_current_session_id';
 
-const DEFAULT_CODE = `researcher = Agent(
-    name="Researcher",
-    role="Market researcher specializing in SaaS and B2B trends.",
-    goal="Find and refine a promising SaaS idea based on analyst feedback",
-    input=analyst.output
-)
+function parseAgentConfigsFromCode(code: string): Array<{ name: string; className: string; variable: string }>
+{
+  const configs: Array<{ name: string; className: string; variable: string }> = [];
+  const classMatches = [...code.matchAll(/class (\w+)\(Agent\):\s*/g)];
+  const classesByName = new Map<string, { name: string }>();
 
-analyst = Agent(
-  name="Analyst",
-  role="Critical analyst who identifies flaws and improvement opportunities.",
-  goal="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
-  input=researcher.output
-)
+  for (let i = 0; i < classMatches.length; i++)
+  {
+    const className = classMatches[i][1];
+    const bodyStart = classMatches[i].index! + classMatches[i][0].length;
+    const bodyEnd = i + 1 < classMatches.length
+      ? classMatches[i + 1].index!
+      : code.length;
+    const nextClass = code.slice(bodyStart).match(/\nclass \w+\(Agent\)/);
+    const end = nextClass
+      ? bodyStart + nextClass.index!
+      : bodyEnd;
+    const body = code.slice(bodyStart, end);
+    const nameMatch = body.match(/name\s*=\s*["']([^"']*)["']/);
+    classesByName.set(className, {
+      name: nameMatch ? nameMatch[1].trim() : className,
+    });
+  }
 
-workflow = Workflow(
-  agents=
-  [
-    "researcher",
-    "analyst"
-  ],
-  start_agent="researcher",
-  max_rounds=8
-)
+  for (const [className, attrs] of classesByName)
+  {
+    let variable = '';
+    const pattern = new RegExp(
+      `(\\w+)\\s*=\\s*${className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`,
+      'g',
+    );
+    let m;
+    while ((m = pattern.exec(code)) !== null)
+    {
+      const argsStart = m.index + m[0].length;
+      const argsEnd = findMatchingParen(code, argsStart - 1);
+      const argumentsStr = code.slice(argsStart, argsEnd);
+      const goalMatch = argumentsStr.match(/goal\s*=\s*["']([^"']*)["']/);
+      if (goalMatch)
+      {
+        variable = m[1];
+        break;
+      }
+    }
+    configs.push({
+      name: attrs.name || className,
+      className,
+      variable: variable || className.charAt(0).toLowerCase() + className.slice(1),
+    });
+  }
 
-workflow.run()`;
+  configs.sort((a, b) =>
+  {
+    const instA = code.indexOf(`${a.variable} = ${a.className}`);
+    const instB = code.indexOf(`${b.variable} = ${b.className}`);
+    const idxA = instA >= 0 ? instA : code.indexOf(`class ${a.className}(Agent)`);
+    const idxB = instB >= 0 ? instB : code.indexOf(`class ${b.className}(Agent)`);
+    return idxA - idxB;
+  });
+  return configs;
+}
+
+function getAgentDisplayNameFromFileContent(content: string): string
+{
+  const nameMatch = content.match(/name\s*=\s*["']([^"']*)["']/);
+  if (nameMatch && nameMatch[1].trim())
+  {
+    return nameMatch[1].trim();
+  }
+  const classMatch = content.match(/class (\w+)\(Agent\)/);
+  return classMatch ? classMatch[1] : '';
+}
+
+function agentNameToKebab(name: string): string
+{
+  const result: string[] = [];
+  for (let i = 0; i < name.length; i++)
+  {
+    const c = name[i];
+    if (/\s/.test(c))
+    {
+      if (result.length > 0 && result[result.length - 1] !== '-')
+      {
+        result.push('-');
+      }
+    }
+    else if (/[A-Z]/.test(c) && i > 0 && result.length > 0 && result[result.length - 1] !== '-')
+    {
+      result.push('-');
+      result.push(c.toLowerCase());
+    }
+    else if (/[a-zA-Z0-9]/.test(c))
+    {
+      result.push(c.toLowerCase());
+    }
+  }
+  return result.join('').replace(/--/g, '-').replace(/^-+|-+$/g, '') || 'agent';
+}
+
+function findMatchingParen(str: string, openIndex: number): number
+{
+  let depth = 1;
+  for (let i = openIndex + 1; i < str.length; i++)
+  {
+    if (str[i] === '(')
+    {
+      depth++;
+    }
+    else if (str[i] === ')')
+    {
+      depth--;
+      if (depth === 0)
+      {
+        return i;
+      }
+    }
+  }
+  return str.length;
+}
+
+function removeAgentFromCode(code: string, agentName: string): string | null
+{
+  const configs = parseAgentConfigsFromCode(code);
+  const config = configs.find((c) => c.name === agentName);
+  if (!config)
+  {
+    return null;
+  }
+
+  const escapedClass = config.className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedVar = config.variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  let result = code;
+
+  const classRegex = new RegExp(
+    `class ${escapedClass}\\(Agent\\):\\s*\\n(?:    .+\\n)*`,
+    'g',
+  );
+  result = result.replace(classRegex, '');
+
+  const instanceRegex = new RegExp(
+    `${escapedVar}\\s*=\\s*${escapedClass}\\s*\\([^)]*\\)\\s*\\n?`,
+    'g',
+  );
+  result = result.replace(instanceRegex, '');
+
+  return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+type AgentCodeConfig =
+{
+  className: string;
+  displayName: string;
+  role: string;
+  output: string;
+  tools: string;
+  variableName: string;
+  goal: string;
+  input: string;
+};
+
+function createAgentCode(config: AgentCodeConfig): { classDef: string; instantiation: string }
+{
+  const classDef = `
+class ${config.className}(Agent):
+    name = "${config.displayName}"
+    role = "${config.role}"
+    output = "${config.output}"
+    tools = ${config.tools}
+`;
+  const instantiation = `${config.variableName} = ${config.className}(\n    goal="${config.goal}",\n    input=${config.input}\n)`;
+  return { classDef, instantiation };
+}
+
+function addAgentSkeletonToCode(code: string): { code: string; newAgentName: string }
+{
+  const configs = parseAgentConfigsFromCode(code);
+  const newAgentNums = configs
+    .map((c) =>
+    {
+      if (c.name === 'New Agent')
+      {
+        return 1;
+      }
+      const m = c.name.match(/^New Agent (\d+)$/);
+      return m ? Number(m[1]) : 0;
+    })
+    .filter((n) => n > 0);
+  const nextNum = newAgentNums.length > 0 ? Math.max(...newAgentNums) + 1 : 1;
+  const displayName = nextNum === 1 ? 'New Agent' : `New Agent ${nextNum}`;
+  const className = `NewAgent${nextNum}`;
+  const variableName = nextNum === 1 ? 'newAgent' : `newAgent${nextNum}`;
+  const { classDef, instantiation } = createAgentCode(
+  {
+    className,
+    displayName,
+    role: '',
+    output: '{round}.md',
+    tools: '[ReadFile, WriteFile]',
+    variableName,
+    goal: '...',
+    input: '...',
+  });
+
+  if (configs.length === 0)
+  {
+    return {
+      code: code.trimEnd() + classDef + '\n\n' + instantiation + '\n',
+      newAgentName: displayName,
+    };
+  }
+
+  const firstIdx = code.indexOf(`${configs[0].variable} = ${configs[0].className}`);
+  if (firstIdx < 0)
+  {
+    return {
+      code: code.trimEnd() + classDef + '\n\n' + instantiation + '\n',
+      newAgentName: displayName,
+    };
+  }
+
+  const beforeInstantiations = code.slice(0, firstIdx).trimEnd();
+  const instantiations = code.slice(firstIdx).trimStart();
+
+  const withNewClass = beforeInstantiations + classDef + '\n\n' + instantiations;
+  return {
+    code: withNewClass.trimEnd() + '\n\n' + instantiation + '\n',
+    newAgentName: displayName,
+  };
+}
+
+function buildDefaultCode(): string
+{
+  const researcher = createAgentCode(
+  {
+    className: 'Researcher',
+    displayName: 'Researcher',
+    role: 'Market researcher specializing in SaaS and B2B trends.',
+    output: 'researcher_{round}.md',
+    tools: '[ReadFile, WriteFile]',
+    variableName: 'researcher',
+    goal: "Find and refine a promising SaaS idea based on analyst feedback",
+    input: 'analyst.output',
+  });
+  const analyst = createAgentCode(
+  {
+    className: 'Analyst',
+    displayName: 'Analyst',
+    role: "Critical analyst who identifies flaws and improvement opportunities.",
+    output: 'analyst_{round}.md',
+    tools: '[ReadFile, WriteFile]',
+    variableName: 'analyst',
+    goal: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+    input: 'researcher.output',
+  });
+  return (
+    researcher.classDef.trim() +
+    '\n\n' +
+    analyst.classDef.trim() +
+    '\n\n' +
+    researcher.instantiation +
+    '\n\n' +
+    analyst.instantiation +
+    '\n'
+  );
+}
+
+const DEFAULT_CODE = buildDefaultCode();
 
 function clampPercentage(value: number, minimum: number, maximum: number): number
 {
@@ -199,7 +443,6 @@ function debugLog(hypothesisId: string, message: string, data: Record<string, un
 function App()
 {
   const contentAreaRef = useRef<HTMLDivElement | null>(null);
-  const mainSplitRef = useRef<HTMLDivElement | null>(null);
   const [pathname, setPathname] = useState(getCurrentPathname);
   const [code, setCode] = useState(DEFAULT_CODE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -208,12 +451,11 @@ function App()
   const [agentOutputs, setAgentOutputs] = useState<Record<string, string>>({});
   const [workflowResult, setWorkflowResult] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(readStoredSessionId);
-  const [editorActiveTab, setEditorActiveTab] = useState('code');
+  const [editorActiveTab, setEditorActiveTab] = useState('workflow');
   const [isRunning, setIsRunning] = useState(false);
   const [, setTick] = useState(0);
-  const [editorWidthPercent, setEditorWidthPercent] = useState(() => readPercentageCookie(EDITOR_WIDTH_COOKIE_NAME, 62, 30, 70));
+  const [maxRounds, setMaxRounds] = useState(8);
   const [logHeightPercent, setLogHeightPercent] = useState(() => readPercentageCookie(LOG_HEIGHT_COOKIE_NAME, 28, 18, 55));
-  const [timeoutSeconds, setTimeoutSeconds] = useState(240);
   const abortControllerRef = useRef<AbortController | null>(null);
   const workflowStartTimeRef = useRef<number | null>(null);
   const closedSocketIdsRef = useRef<Set<string>>(new Set());
@@ -241,7 +483,7 @@ function App()
   const loadResultContent = async (sessionId: string, filename: string): Promise<string> =>
   {
     const response = await axios.get<SessionResultResponse>(
-      `http://localhost:8000/sessions/${sessionId}/results/${encodeURIComponent(filename)}`,
+      `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent(filename)}`,
     );
     return response.data.content;
   };
@@ -325,12 +567,6 @@ function App()
       setAgentOutputs(nextAgentOutputs);
       setWorkflowResult(nextWorkflowResult);
 
-      const sessionTimeout = snapshot.settings?.timeout;
-      if (typeof sessionTimeout === 'number' && sessionTimeout > 0)
-      {
-        setTimeoutSeconds(sessionTimeout);
-      }
-
       const parsedStartedAt =
         typeof snapshot.startedAt === 'string'
           ? Date.parse(snapshot.startedAt)
@@ -347,12 +583,37 @@ function App()
       {
         try
         {
-          const codeResponse = await axios.get<{ content: string }>(
-            `http://localhost:8000/sessions/${snapshot.sessionId}/code`,
+          const filesRes = await axios.get<{ files: string[] }>(
+            `http://localhost:8000/sessions/${snapshot.sessionId}/files`,
           );
-          const sessionCode = codeResponse.data.content ?? '';
-          setCode(sessionCode);
-          lastSyncedCodeRef.current = sessionCode;
+          const pyFiles = (filesRes.data.files ?? []).filter(
+            (f) => f.endsWith('.py') && f !== 'workflow.py',
+          );
+          const [workflowCode, ...agentContents] = await Promise.all([
+            loadResultContent(snapshot.sessionId, 'workflow.py').catch(() => ''),
+            ...pyFiles.map((f) =>
+              loadResultContent(snapshot.sessionId, f).catch(() => ''),
+            ),
+          ]);
+          const withNames = agentContents
+            .filter((c) => c !== '')
+            .map((c) => [getAgentDisplayNameFromFileContent(c), c] as const);
+          const nameToContent = new Map(withNames);
+          const ordered = agentNames
+            .map((name) => nameToContent.get(name))
+            .filter((c): c is string => c !== undefined);
+          const remaining = withNames
+            .filter(([name]) => !agentNames.includes(name))
+            .map(([, c]) => c);
+          const orderedRemaining = ordered.concat(remaining);
+          const agentPart = orderedRemaining.join('\n\n');
+          const sessionCode =
+            agentPart && workflowCode
+              ? `${agentPart}\n\n${workflowCode}`
+              : agentPart || workflowCode || '';
+          const codeToUse = sessionCode || buildDefaultCode();
+          setCode(codeToUse);
+          lastSyncedCodeRef.current = sessionCode ? sessionCode : null;
         }
         catch
         {
@@ -399,6 +660,20 @@ function App()
 
   useEffect(() =>
   {
+    if (editorActiveTab.startsWith('agent:'))
+    {
+      const agentName = editorActiveTab.replace('agent:', '');
+      const configs = parseAgentConfigsFromCode(code);
+      const hasConfig = configs.some((c) => c.name === agentName);
+      if (!hasConfig)
+      {
+        setEditorActiveTab('workflow');
+      }
+    }
+  }, [code, editorActiveTab]);
+
+  useEffect(() =>
+  {
     if (currentSessionId === null)
     {
       return;
@@ -419,10 +694,31 @@ function App()
         return;
       }
 
-      void axios.put(`http://localhost:8000/sessions/${sessionId}/code`,
-      {
-        content: currentCode,
-      })
+      const workflowCode = extractWorkflowCode(currentCode);
+      const configs = parseAgentConfigsFromCode(currentCode);
+      const currentClassNames = new Set(configs.map((c) => c.className));
+      const lastClassNames = lastSyncedCodeRef.current
+        ? new Set(parseAgentConfigsFromCode(lastSyncedCodeRef.current).map((c) => c.className))
+        : new Set<string>();
+      const toDelete = [...lastClassNames].filter((cn) => !currentClassNames.has(cn));
+
+      void Promise.all([
+        axios.put(
+          `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent('workflow.py')}`,
+          { content: workflowCode },
+        ),
+        ...configs.map((cfg) =>
+          axios.put(
+            `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent(`${agentNameToKebab(cfg.className)}.py`)}`,
+            { content: extractAgentClassCode(currentCode, cfg.className) },
+          ),
+        ),
+        ...toDelete.map((className) =>
+          axios.delete(
+            `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent(`${agentNameToKebab(className)}.py`)}`,
+          ),
+        ),
+      ])
         .then(() =>
         {
           lastSyncedCodeRef.current = currentCode;
@@ -494,10 +790,8 @@ function App()
       persistCurrentSessionId(newId);
       clearSessionSnapshot();
       setLogs([]);
-      setCode(DEFAULT_CODE);
-      lastSyncedCodeRef.current = DEFAULT_CODE;
-      setEditorActiveTab('code');
       await loadSession(newId);
+      setEditorActiveTab('workflow');
     }
     catch
     {
@@ -550,6 +844,7 @@ function App()
       {
         code,
         sessionId: currentSessionId,
+        maxRounds,
       },
       {
         signal,
@@ -722,11 +1017,6 @@ function App()
 
   useEffect(() =>
   {
-    writePercentageCookie(EDITOR_WIDTH_COOKIE_NAME, editorWidthPercent);
-  }, [editorWidthPercent]);
-
-  useEffect(() =>
-  {
     writePercentageCookie(LOG_HEIGHT_COOKIE_NAME, logHeightPercent);
   }, [logHeightPercent]);
 
@@ -776,37 +1066,6 @@ function App()
 
     window.history.pushState({}, '', nextPathname);
     setPathname(nextPathname);
-  };
-
-  const handleVerticalResizeStart = (event: React.PointerEvent<HTMLDivElement>) =>
-  {
-    const mainSplit = mainSplitRef.current;
-    if (mainSplit === null)
-    {
-      return;
-    }
-
-    event.preventDefault();
-    const rect = mainSplit.getBoundingClientRect();
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-
-    const handlePointerMove = (moveEvent: PointerEvent) =>
-    {
-      const nextWidthPercent = ((moveEvent.clientX - rect.left) / rect.width) * 100;
-      setEditorWidthPercent(clampPercentage(nextWidthPercent, 30, 70));
-    };
-
-    const handlePointerUp = () =>
-    {
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
   };
 
   const handleHorizontalResizeStart = (event: React.PointerEvent<HTMLDivElement>) =>
@@ -877,47 +1136,47 @@ function App()
       ) : (
         <div className={styles.contentArea} ref={contentAreaRef}>
           <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
-            <div className={styles.mainSplit} ref={mainSplitRef}>
-              <section className={styles.panel} style={{ width: `calc(${editorWidthPercent}% - 4px)` }}>
-                <EditorPanel
-                  code={code}
-                  onCodeChange={setCode}
-                  agentOutputs={agentOutputs}
-                  agentNames={agentOrder.length > 0 ? agentOrder : Object.keys(agentStatuses)}
-                  workflowResult={workflowResult}
-                  activeTab={editorActiveTab}
-                  onTabChange={setEditorActiveTab}
-                />
-              </section>
-
-              <div
-                className={styles.verticalResizeHandle}
-                onPointerDown={handleVerticalResizeStart}
-                role="separator"
-                aria-label="Resize editor and status panels"
-                aria-orientation="vertical"
-              />
-
-              <section className={styles.panel} style={{ width: `calc(${100 - editorWidthPercent}% - 4px)` }}>
-                <StatusView
-                  agentStatuses={
-                    agentOrder.length > 0
-                      ? [
-                          ...agentOrder
-                            .filter((name) => agentStatuses[name] !== undefined)
-                            .map((name) => agentStatuses[name]),
-                          ...Object.values(agentStatuses).filter(
-                            (s) => !agentOrder.includes(s.name),
-                          ),
-                        ]
-                      : Object.values(agentStatuses)
+            <section className={styles.panel} style={{ flex: 1 }}>
+              <EditorPanel
+                code={code}
+                onCodeChange={setCode}
+                agentOutputs={agentOutputs}
+                agentStatuses={agentStatuses}
+                agentOrder={agentOrder}
+                workflowId={currentSessionId}
+                maxRounds={maxRounds}
+                onMaxRoundsChange={setMaxRounds}
+                workflowResult={workflowResult}
+                activeTab={editorActiveTab}
+                onTabChange={setEditorActiveTab}
+                onCloseAgentTab={(agentName: string) =>
+                {
+                  const configs = parseAgentConfigsFromCode(code);
+                  const config = configs.find((c) => c.name === agentName);
+                  if (config && currentSessionId !== null)
+                  {
+                    void axios.delete(
+                      `http://localhost:8000/sessions/${currentSessionId}/${encodeURIComponent(`${agentNameToKebab(config.className)}.py`)}`,
+                    ).catch(() => {});
                   }
-                  workflowResult={workflowResult}
-                  timeoutSeconds={timeoutSeconds}
-                  onShowAgentResults={(agentName) => setEditorActiveTab(`agent:${agentName}`)}
-                />
-              </section>
-            </div>
+                  const newCode = removeAgentFromCode(code, agentName);
+                  if (newCode !== null)
+                  {
+                    setCode(newCode);
+                    if (editorActiveTab === `agent:${agentName}`)
+                    {
+                      setEditorActiveTab('workflow');
+                    }
+                  }
+                }}
+                onAddAgent={() =>
+                {
+                  const { code: newCode, newAgentName } = addAgentSkeletonToCode(code);
+                  setCode(newCode);
+                  setEditorActiveTab(`agent:${newAgentName}`);
+                }}
+              />
+            </section>
           </div>
 
           <div

@@ -7,8 +7,8 @@ from typing import Any, Callable
 from storage import DEFAULT_SETTINGS
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
-RESULTS_ROOT = WORKSPACE_ROOT / "results"
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+SESSIONS_ROOT = WORKSPACE_ROOT / "sessions"
 
 _workflow_session_id: ContextVar[str | None] = ContextVar(
     "workflow_session_id",
@@ -73,7 +73,7 @@ def set_workflow_context(agent_name: str | None, round_number: int | None) -> No
     _workflow_round_number.set(round_number)
 
 
-def _normalize_results_path(target_path: Path) -> Path:
+def _normalize_output_path(target_path: Path) -> Path:
     if target_path.suffix == "":
         target_path = target_path.with_suffix(".md")
     elif target_path.suffix == ".txt":
@@ -90,16 +90,53 @@ def _sanitize_agent_name(agent_name: str) -> str:
 def get_session_directory(session_id: str | None = None) -> Path:
     resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
     if resolved_session_id is None:
-        return RESULTS_ROOT
+        return SESSIONS_ROOT
 
-    return RESULTS_ROOT / resolved_session_id
+    return SESSIONS_ROOT / resolved_session_id
+
+
+WORKFLOW_STATE_FILENAME = "workflow.json"
+WORKFLOW_CODE_FILENAME = "workflow.py"
+
+
+def _agent_name_to_kebab(name: str) -> str:
+    result: list[str] = []
+    for i, c in enumerate(name):
+        if c.isspace():
+            if result and result[-1] != "-":
+                result.append("-")
+        elif c.isupper() and i > 0 and result and result[-1] != "-":
+            result.append("-")
+            result.append(c.lower())
+        elif c.isalnum():
+            result.append(c.lower())
+    return "".join(result).replace("--", "-").strip("-") or "agent"
+
+
+def get_workflow_state_path(session_id: str | None = None) -> Path:
+    return get_session_directory(session_id) / WORKFLOW_STATE_FILENAME
+
+
+def get_workflow_code_path(session_id: str | None = None) -> Path:
+    return get_session_directory(session_id) / WORKFLOW_CODE_FILENAME
+
+
+def get_agent_code_path(agent_name: str, session_id: str | None = None) -> Path:
+    kebab = _agent_name_to_kebab(agent_name)
+    return get_session_directory(session_id) / f"{kebab}.py"
+
+
+def get_agent_code_path_by_class_name(class_name: str, session_id: str | None = None) -> Path:
+    """Agent files are named by class name (e.g. NewAgent1 -> new-agent-1.py)."""
+    kebab = _agent_name_to_kebab(class_name)
+    return get_session_directory(session_id) / f"{kebab}.py"
 
 
 def get_workflow_file_path(session_id: str | None = None) -> Path:
-    return get_session_directory(session_id) / "workflow.md"
+    return get_workflow_state_path(session_id)
 
 
-def _default_agent_snapshot(agent_name: str) -> dict[str, Any]:
+def _default_agent_snapshot(agent_name: str, output_file: str = "{round}.md") -> dict[str, Any]:
     now = _utc_now()
     return {
         "name": agent_name,
@@ -108,6 +145,7 @@ def _default_agent_snapshot(agent_name: str) -> dict[str, Any]:
         "round": 0,
         "lastResultFile": None,
         "resultFiles": [],
+        "outputFile": output_file,
         "stepStartedAt": None,
         "updatedAt": now,
     }
@@ -163,7 +201,11 @@ def read_workflow_snapshot(session_id: str | None = None) -> dict[str, Any] | No
 
     workflow_path = get_workflow_file_path(resolved_session_id)
     if not workflow_path.exists():
-        return None
+        legacy_path = get_session_directory(resolved_session_id) / "workflow.md"
+        if legacy_path.exists():
+            legacy_path.rename(workflow_path)
+        else:
+            return None
 
     try:
         snapshot = json.loads(workflow_path.read_text(encoding="utf-8"))
@@ -178,6 +220,9 @@ def read_workflow_snapshot(session_id: str | None = None) -> dict[str, Any] | No
         snapshot["agentOrder"] = []
     if "agents" not in snapshot or not isinstance(snapshot["agents"], dict):
         snapshot["agents"] = {}
+    for agent_name, agent_data in list(snapshot["agents"].items()):
+        if isinstance(agent_data, dict) and "outputFile" not in agent_data:
+            agent_data["outputFile"] = "{round}.md"
     if "status" not in snapshot or not isinstance(snapshot["status"], str):
         snapshot["status"] = "running"
     if "runId" not in snapshot:
@@ -254,14 +299,63 @@ def create_session() -> str:
     return session_id
 
 
+def _pattern_to_regex(pattern: str) -> str:
+    """Convert output pattern like 'result_{round}.md' to regex to extract round."""
+    import re
+    escaped = re.escape(pattern).replace(r"\{round\}", r"(\d+)")
+    return escaped
+
+
+def _rename_agent_result_files(
+    session_dir: Path,
+    old_pattern: str,
+    new_pattern: str,
+    result_files: list[str],
+    last_result_file: str | None,
+) -> tuple[list[str], str | None]:
+    """Rename result files when output pattern changes. Returns new result_files and lastResultFile."""
+    import re
+    regex = _pattern_to_regex(old_pattern)
+    new_result_files: list[str] = []
+    new_last: str | None = None
+    for old_name in result_files:
+        match = re.fullmatch(regex, old_name)
+        if match:
+            round_str = match.group(1)
+            new_name = new_pattern.replace("{round}", round_str)
+            old_path = session_dir / old_name
+            new_path = session_dir / new_name
+            if old_path.exists() and old_path != new_path:
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                old_path.rename(new_path)
+            new_result_files.append(new_name)
+            if old_name == last_result_file:
+                new_last = new_name
+        else:
+            new_result_files.append(old_name)
+            if old_name == last_result_file:
+                new_last = last_result_file
+    if new_last is None and last_result_file:
+        match = re.fullmatch(regex, last_result_file)
+        if match:
+            round_str = match.group(1)
+            new_last = new_pattern.replace("{round}", round_str)
+        else:
+            new_last = last_result_file
+    return new_result_files, new_last
+
+
 def initialize_workflow_session(
     session_id: str,
     agent_order: list[str],
     run_id: str | None = None,
+    agent_output_files: dict[str, str] | None = None,
 ) -> None:
     resolved_session_id = _normalize_session_id(session_id)
     if resolved_session_id is None:
         return
+
+    output_files = agent_output_files or {}
 
     existing = read_workflow_snapshot(resolved_session_id)
     if existing is not None and run_id is not None:
@@ -285,6 +379,28 @@ def initialize_workflow_session(
             existing_settings = existing.get("settings")
             if isinstance(existing_settings, dict):
                 snapshot["settings"] = existing_settings
+
+    session_dir = get_session_directory(resolved_session_id)
+    for agent_name in agent_order:
+        output_file = output_files.get(agent_name, "{round}.md")
+        _ensure_agent_snapshot(snapshot, agent_name)
+        snapshot["agents"][agent_name]["outputFile"] = output_file
+
+        if existing is not None:
+            old_agent = existing.get("agents", {}).get(agent_name)
+            old_pattern = old_agent.get("outputFile", "{round}.md") if isinstance(old_agent, dict) else "{round}.md"
+            if old_pattern != output_file and session_dir.exists():
+                old_result_files = old_agent.get("resultFiles", []) if isinstance(old_agent, dict) else []
+                old_last = old_agent.get("lastResultFile") if isinstance(old_agent, dict) else None
+                new_result_files, new_last = _rename_agent_result_files(
+                    session_dir,
+                    old_pattern,
+                    output_file,
+                    old_result_files,
+                    old_last,
+                )
+                snapshot["agents"][agent_name]["resultFiles"] = new_result_files
+                snapshot["agents"][agent_name]["lastResultFile"] = new_last
 
     _write_workflow_snapshot(snapshot, resolved_session_id)
 
@@ -430,6 +546,18 @@ def record_result_file(
     update_workflow_snapshot(apply, session_id)
 
 
+def list_session_files(session_id: str) -> list[str]:
+    resolved_session_id = _normalize_session_id(session_id)
+    if resolved_session_id is None:
+        raise ValueError("Session ID is required.")
+
+    session_dir = get_session_directory(resolved_session_id)
+    if not session_dir.exists():
+        return []
+
+    return [f.name for f in session_dir.iterdir() if f.is_file()]
+
+
 def resolve_session_result_path(session_id: str, filename: str) -> Path:
     resolved_session_id = _normalize_session_id(session_id)
     if resolved_session_id is None:
@@ -439,31 +567,109 @@ def resolve_session_result_path(session_id: str, filename: str) -> Path:
     return get_session_directory(resolved_session_id) / safe_filename
 
 
-SESSION_CODE_FILENAME = "code.py"
+def _extract_workflow_and_agent_code(code: str) -> tuple[str, dict[str, str]]:
+    """Extract workflow code and agent class code from combined code."""
+    import re
+
+    workflow_code = ""
+    agent_code: dict[str, str] = {}
+
+    class_matches = list(re.finditer(r"class (\w+)\(Agent\):\s*", code))
+    for i, match in enumerate(class_matches):
+        class_name = match.group(1)
+        body_start = match.end()
+        next_class = re.search(r"\nclass \w+\(Agent\)", code[body_start:])
+        next_inst = re.search(r"\n([A-Za-z_]\w*)\s*=\s*\w+\s*\(", code[body_start:])
+        class_end = len(code)
+        if next_class and next_inst:
+            class_end = body_start + min(next_class.start(), next_inst.start())
+        elif next_class:
+            class_end = body_start + next_class.start()
+        elif next_inst:
+            class_end = body_start + next_inst.start()
+        elif i + 1 < len(class_matches):
+            class_end = class_matches[i + 1].start()
+        class_block = code[match.start() : class_end].strip()
+        agent_code[class_name] = class_block
+
+    first_inst = re.search(r"\n([A-Za-z_]\w*)\s*=\s*\w+\s*\(", code)
+    if first_inst:
+        workflow_code = code[first_inst.start() :].lstrip()
+    elif not class_matches:
+        workflow_code = code.strip()
+
+    return workflow_code, agent_code
 
 
-def get_session_code_path(session_id: str | None = None) -> Path | None:
-    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
-    if resolved_session_id is None:
-        return None
-    return get_session_directory(resolved_session_id) / SESSION_CODE_FILENAME
+def _get_agent_name_from_class(class_code: str) -> str | None:
+    """Extract agent display name from class body (name attr or class name)."""
+    import re
+
+    match = re.search(r'name\s*=\s*["\']([^"\']*)["\']', class_code)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    match = re.search(r"class (\w+)\(Agent\)", class_code)
+    return match.group(1) if match else None
 
 
 def write_session_code(code: str, session_id: str | None = None) -> None:
-    path = get_session_code_path(session_id)
-    if path is None:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(code, encoding="utf-8")
+
+    session_dir = get_session_directory(resolved_session_id)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    workflow_code, agent_code = _extract_workflow_and_agent_code(code)
+
+    workflow_path = get_workflow_code_path(resolved_session_id)
+    workflow_path.write_text(workflow_code, encoding="utf-8")
+
+    for class_name, class_body in agent_code.items():
+        agent_path = get_agent_code_path_by_class_name(class_name, resolved_session_id)
+        agent_path.write_text(class_body, encoding="utf-8")
 
 
 def read_session_code(session_id: str) -> str:
-    path = get_session_code_path(session_id)
-    if path is None:
+    resolved_session_id = _normalize_session_id(session_id)
+    if resolved_session_id is None:
         raise FileNotFoundError("Session not found.")
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-    return path.read_text(encoding="utf-8")
+
+    session_dir = get_session_directory(resolved_session_id)
+    if not session_dir.exists():
+        raise FileNotFoundError(str(session_dir))
+
+    workflow_path = get_workflow_code_path(resolved_session_id)
+    workflow_code = (
+        workflow_path.read_text(encoding="utf-8")
+        if workflow_path.exists()
+        else ""
+    )
+
+    snapshot = read_workflow_snapshot(resolved_session_id)
+    agent_order = snapshot.get("agentOrder", []) if snapshot else []
+
+    agent_parts_by_name: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for path in sorted(session_dir.glob("*.py")):
+        if path.name == WORKFLOW_CODE_FILENAME:
+            continue
+        content = path.read_text(encoding="utf-8")
+        agent_name = _get_agent_name_from_class(content)
+        if agent_name and agent_name not in seen:
+            seen.add(agent_name)
+            agent_parts_by_name.append((agent_name, content))
+
+    name_to_content = {n: c for (n, c) in agent_parts_by_name}
+    ordered = [name_to_content[name] for name in agent_order if name in name_to_content]
+    remaining = [c for (n, c) in agent_parts_by_name if n not in agent_order]
+    agent_parts = ordered + remaining
+
+    combined = "\n\n".join(agent_parts)
+    if workflow_code:
+        combined = (combined + "\n\n" + workflow_code) if combined else workflow_code
+    return combined
 
 
 def read_session_result_file(session_id: str, filename: str) -> str:
@@ -474,27 +680,93 @@ def read_session_result_file(session_id: str, filename: str) -> str:
     return target_path.read_text(encoding="utf-8")
 
 
+def _apply_agent_output_rename(session_id: str, filename: str, content: str) -> None:
+    """If an agent file's output pattern changed, rename result files and update snapshot."""
+    import re
+    if not filename.endswith(".py") or filename == "workflow.py":
+        return
+    output_match = re.search(r'output\s*=\s*["\']([^"\']*)["\']', content)
+    name_match = re.search(r'name\s*=\s*["\']([^"\']*)["\']', content)
+    if not output_match or not name_match:
+        return
+    new_pattern = output_match.group(1)
+    agent_name = name_match.group(1).strip()
+    if not agent_name:
+        return
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        return
+    agent_snapshot = snapshot.get("agents", {}).get(agent_name)
+    if not isinstance(agent_snapshot, dict):
+        return
+    old_pattern = agent_snapshot.get("outputFile", "{round}.md")
+    if old_pattern == new_pattern:
+        return
+    session_dir = get_session_directory(session_id)
+    if not session_dir.exists():
+        return
+    result_files = agent_snapshot.get("resultFiles", [])
+    last_result_file = agent_snapshot.get("lastResultFile")
+    new_result_files, new_last = _rename_agent_result_files(
+        session_dir,
+        old_pattern,
+        new_pattern,
+        result_files,
+        last_result_file,
+    )
+
+    def apply(s: dict[str, Any]) -> None:
+        agent = _ensure_agent_snapshot(s, agent_name)
+        agent["outputFile"] = new_pattern
+        agent["resultFiles"] = new_result_files
+        agent["lastResultFile"] = new_last
+
+    update_workflow_snapshot(apply, session_id)
+
+
+def write_session_file(session_id: str, filename: str, content: str) -> None:
+    target_path = resolve_session_result_path(session_id, filename)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(content, encoding="utf-8")
+    _apply_agent_output_rename(session_id, filename, content)
+
+
+def delete_session_file(session_id: str, filename: str) -> None:
+    target_path = resolve_session_result_path(session_id, filename)
+    if target_path.exists():
+        target_path.unlink()
+
+
 def _resolve_path(filename: str, for_write: bool = False) -> Path:
     target_path = Path(filename)
 
     if target_path.is_absolute():
-        return _normalize_results_path(target_path)
+        return _normalize_output_path(target_path)
 
     session_id = get_workflow_session_id()
-    if target_path.parts and target_path.parts[0] == "results":
+    if target_path.parts and target_path.parts[0] == "sessions":
         parts = list(target_path.parts)
         if len(parts) >= 2 and len(parts[1]) == 32 and all(c in "0123456789abcdef" for c in parts[1].lower()):
             parts[1] = parts[1][:6]
-        return _normalize_results_path(WORKSPACE_ROOT / Path(*parts))
+        return _normalize_output_path(WORKSPACE_ROOT / Path(*parts))
     if session_id:
         if for_write:
             agent_name = _sanitize_agent_name(_workflow_agent_name.get() or "agent")
             round_number = _workflow_round_number.get()
             round_str = str(round_number) if round_number is not None else "0"
-            prefix = get_workflow_run_id() or session_id
-            base_name = f"{prefix}_{agent_name}_{round_str}"
-            return RESULTS_ROOT / session_id / _normalize_results_path(Path(base_name))
-        target_path = _normalize_results_path(target_path)
+            workflow_snapshot = read_workflow_snapshot(session_id)
+            output_pattern = "{round}.md"
+            if (
+                workflow_snapshot is not None and
+                isinstance(agent_name, str) and
+                agent_name != ""
+            ):
+                agent_snapshot = workflow_snapshot.get("agents", {}).get(agent_name)
+                if isinstance(agent_snapshot, dict):
+                    output_pattern = agent_snapshot.get("outputFile", "{round}.md")
+            base_name = str(output_pattern).replace("{round}", round_str)
+            return SESSIONS_ROOT / session_id / _normalize_output_path(Path(base_name))
+        target_path = _normalize_output_path(target_path)
         workflow_snapshot = read_workflow_snapshot(session_id)
         current_agent_name = _workflow_agent_name.get()
         if (
@@ -506,10 +778,10 @@ def _resolve_path(filename: str, for_write: bool = False) -> Path:
             if isinstance(agent_snapshot, dict):
                 last_result_file = agent_snapshot.get("lastResultFile")
                 if isinstance(last_result_file, str) and last_result_file != "":
-                    return RESULTS_ROOT / session_id / last_result_file
+                    return SESSIONS_ROOT / session_id / last_result_file
         prefix = get_workflow_run_id() or session_id
-        return RESULTS_ROOT / session_id / f"{prefix}_{target_path.name}"
-    return _normalize_results_path(RESULTS_ROOT / target_path)
+        return SESSIONS_ROOT / session_id / f"{prefix}_{target_path.name}"
+    return _normalize_output_path(SESSIONS_ROOT / target_path)
 
 
 def write_file_tool(filename: str, content: str) -> str:
@@ -527,3 +799,19 @@ def read_file_tool(filename: str) -> str:
         return f"File not found: {target_path}"
 
     return target_path.read_text(encoding="utf-8")
+
+
+# --- Concrete tools ---
+
+from .read_file import create_read_file
+from .write_file import create_write_file
+from .search_web import SearchWeb
+
+ReadFile = create_read_file(read_file_tool)
+WriteFile = create_write_file(write_file_tool)
+
+TOOL_REGISTRY: dict[str, type] = {
+    "ReadFile": ReadFile,
+    "WriteFile": WriteFile,
+    "SearchWeb": SearchWeb,
+}

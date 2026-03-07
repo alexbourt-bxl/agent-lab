@@ -55,15 +55,8 @@
 
 .mainArea
 {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.mainSplit
-{
   display: flex;
-  gap: 0;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   overflow: hidden;
 }
@@ -93,27 +86,15 @@
   min-height: 0;
 }
 
-.verticalResizeHandle,
 .horizontalResizeHandle
 {
   position: relative;
   flex: none;
+  height: 8px;
+  cursor: row-resize;
   background-color: transparent;
 }
 
-.verticalResizeHandle
-{
-  width: 8px;
-  cursor: col-resize;
-}
-
-.horizontalResizeHandle
-{
-  height: 8px;
-  cursor: row-resize;
-}
-
-.verticalResizeHandle::before,
 .horizontalResizeHandle::before
 {
   content: '';
@@ -123,7 +104,6 @@
   opacity: 0.9;
 }
 
-.verticalResizeHandle:hover::before,
 .horizontalResizeHandle:hover::before
 {
   background-color: #2a2f3a;
@@ -131,11 +111,6 @@
 
 @media (max-width: 900px)
 {
-  .mainSplit
-  {
-    flex-direction: column;
-  }
-
   .topBar
   {
     flex-direction: column;
@@ -153,8 +128,4 @@
     width: 100%;
   }
 
-  .verticalResizeHandle
-  {
-    display: none;
-  }
 }

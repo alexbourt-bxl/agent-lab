@@ -20,6 +20,8 @@
 .tab,
 .tabActive
 {
+  display: inline-flex;
+  align-items: center;
   padding: 8px 14px;
   border: 1px solid transparent;
   border-bottom: none;
@@ -31,6 +33,14 @@
   font-family: inherit;
   cursor: pointer;
   transition: color 0.2s, background-color 0.2s;
+  outline: none;
+}
+
+.tab:focus-visible,
+.tabActive:focus-visible
+{
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }
 
 .tab:hover
@@ -49,20 +59,208 @@
 
 .tabContent
 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tabSpinner
+{
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: tabSpin 0.8s linear infinite;
+}
+
+@keyframes tabSpin
+{
+  from
+  {
+    transform: rotate(0deg);
+  }
+
+  to
+  {
+    transform: rotate(360deg);
+  }
+}
+
+.tabClose
+{
+  margin-left: 6px;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  outline: none;
+}
+
+.tabClose:focus-visible
+{
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.tabClose:hover
+{
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.tabAdd
+{
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background-color: transparent;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+  outline: none;
+}
+
+.tabAdd:focus-visible
+{
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.tabAdd:hover
+{
+  color: #cbd5e1;
+  background-color: #1e293b;
+}
+
+.tabContentArea
+{
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.twoPaneSplit
+{
+  display: flex;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
+.codePane,
+.resultPane
+{
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.verticalResizeHandle
+{
+  width: 8px;
+  flex: none;
+  cursor: col-resize;
+  background-color: transparent;
+  position: relative;
+}
+
+.verticalResizeHandle::before
+{
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  opacity: 0.9;
+}
+
+.verticalResizeHandle:hover::before
+{
+  background-color: #2a2f3a;
+}
+
+.workflowHeader
+{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2f3a;
+  background-color: #1e293b;
+}
+
+.workflowId
+{
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.maxRoundsLabel
+{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.maxRoundsInput
+{
+  width: 4rem;
+  padding: 4px 8px;
+  border: 1px solid #2a2f3a;
+  border-radius: 6px;
+  background-color: #0f1117;
+  color: #e5e7eb;
+  font-size: 0.9rem;
+}
+
+.agentHeader
+{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2f3a;
+  background-color: #1e293b;
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.agentElapsed
+{
+  font-weight: 500;
+  color: #60a5fa;
+}
+
+.agentStatus
+{
+  flex: 1;
+}
+
 .editorShell
 {
-  height: 100%;
-  min-height: 360px;
+  flex: 1;
+  min-height: 200px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .outputContent
 {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   padding: 16px;
   overflow: auto;
   font-family: 'Cascadia Code', 'Consolas', monospace;
