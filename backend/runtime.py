@@ -470,7 +470,15 @@ class WorkflowRunner:
         import time
 
         from main import emit_agent_event, emit_event
+        from tools import get_workflow_run_id, get_workflow_session_id
         from workflow_state import cancel_requested
+
+        def _workflow_prefix() -> str:
+            sid = get_workflow_session_id()
+            rid = get_workflow_run_id()
+            if sid and rid:
+                return f"Workflow {sid}-{rid} "
+            return "Workflow "
 
         if not self.agent_order:
             return
@@ -487,7 +495,7 @@ class WorkflowRunner:
 
                 await emit_event(
                     event_type="system",
-                    message=f"Workflow stopped by user ({self._format_elapsed(elapsed)}).",
+                    message=f"{_workflow_prefix()}stopped by user ({self._format_elapsed(elapsed)}).",
                     state="stopped",
                     round_number=round_number - 1,
                 )
@@ -536,7 +544,7 @@ class WorkflowRunner:
 
                 await emit_event(
                     event_type="system",
-                    message=f"Workflow stopped because no next agent was available ({self._format_elapsed(elapsed)}).",
+                    message=f"{_workflow_prefix()}stopped because no next agent was available ({self._format_elapsed(elapsed)}).",
                     state="done",
                     round_number=round_number,
                 )
@@ -577,7 +585,7 @@ class WorkflowRunner:
 
             await emit_event(
                 event_type="system",
-                message=f"Workflow stopped after reaching the max round limit ({self._format_elapsed(elapsed)}).",
+                message=f"{_workflow_prefix()}stopped after reaching the max round limit ({self._format_elapsed(elapsed)}).",
                 state="done",
                 round_number=self.max_rounds,
             )

@@ -23,6 +23,13 @@
   background-color: #151922;
 }
 
+.topBarLeft
+{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .topBarActions
 {
   display: flex;

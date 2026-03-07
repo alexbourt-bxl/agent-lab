@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "provider": "ollama",
     "model": "qwen3:4b",
     "timeout": 300.0,
-    "llm_server": "http://localhost:11434",
+    "llm_server": "http://192.168.129.11:11434",
 }
 
 
@@ -56,27 +56,5 @@ def load_record(directory: Path, record_id: str) -> dict[str, Any] | None:
 
 
 def load_settings() -> dict[str, Any]:
-    ensure_storage_dirs()
-
-    if not SETTINGS_FILE.exists():
-        return dict(DEFAULT_SETTINGS)
-
-    try:
-        stored_settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return dict(DEFAULT_SETTINGS)
-
-    if not isinstance(stored_settings, dict):
-        return dict(DEFAULT_SETTINGS)
-
-    merged_settings = dict(DEFAULT_SETTINGS)
-    merged_settings.update(stored_settings)
-    return merged_settings
-
-
-def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    merged_settings = dict(DEFAULT_SETTINGS)
-    merged_settings.update(settings)
-    ensure_storage_dirs()
-    SETTINGS_FILE.write_text(json.dumps(merged_settings, indent=2), encoding="utf-8")
-    return merged_settings
+    """Deprecated: returns default settings. Use get_session_settings from tools for session-scoped settings."""
+    return dict(DEFAULT_SETTINGS)

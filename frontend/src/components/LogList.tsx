@@ -9,6 +9,8 @@ type LogEntryRecord =
   message: string;
   eventType?: string;
   agentName?: string;
+  sessionId?: string;
+  runId?: string;
 };
 
 type LogVariant = 'thought' | 'tool-call' | 'result' | 'state' | 'default';

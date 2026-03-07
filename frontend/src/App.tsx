@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { ArrowLeft, Play, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Play } from 'lucide-react';
 import { formatElapsedSeconds } from './utils/formatElapsed';
+import AppMenu from './components/AppMenu';
 import Button from './components/Button';
 import EditorPanel from './components/EditorPanel';
 import LogList from './components/LogList';
@@ -19,6 +20,7 @@ type LogEntry =
   state?: string;
   round?: number;
   sessionId?: string;
+  runId?: string;
 };
 
 type AgentStatus =
@@ -45,6 +47,7 @@ type WorkflowSessionSnapshot =
 {
   sessionId: string;
   status: string;
+  settings?: { timeout?: number };
   agentOrder: string[];
   currentAgent?: string | null;
   currentRound?: number;
@@ -65,6 +68,32 @@ const EDITOR_WIDTH_COOKIE_NAME = 'agent_lab_editor_width';
 const LOG_HEIGHT_COOKIE_NAME = 'agent_lab_log_height';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const CURRENT_SESSION_ID_STORAGE_KEY = 'agent_lab_current_session_id';
+
+const DEFAULT_CODE = `researcher = Agent(
+    name="Researcher",
+    role="Market researcher specializing in SaaS and B2B trends.",
+    goal="Find and refine a promising SaaS idea based on analyst feedback",
+    input=analyst.output
+)
+
+analyst = Agent(
+  name="Analyst",
+  role="Critical analyst who identifies flaws and improvement opportunities.",
+  goal="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+  input=researcher.output
+)
+
+workflow = Workflow(
+  agents=
+  [
+    "researcher",
+    "analyst"
+  ],
+  start_agent="researcher",
+  max_rounds=8
+)
+
+workflow.run()`;
 
 function clampPercentage(value: number, minimum: number, maximum: number): number
 {
@@ -172,31 +201,7 @@ function App()
   const contentAreaRef = useRef<HTMLDivElement | null>(null);
   const mainSplitRef = useRef<HTMLDivElement | null>(null);
   const [pathname, setPathname] = useState(getCurrentPathname);
-  const [code, setCode] = useState(`researcher = Agent(
-    name="Researcher",
-    role="Market researcher specializing in SaaS and B2B trends.",
-    goal="Find and refine a promising SaaS idea based on analyst feedback",
-    input=analyst.output
-)
-
-analyst = Agent(
-  name="Analyst",
-  role="Critical analyst who identifies flaws and improvement opportunities.",
-  goal="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
-  input=researcher.output
-)
-
-workflow = Workflow(
-  agents=
-  [
-    "researcher",
-    "analyst"
-  ],
-  start_agent="researcher",
-  max_rounds=8
-)
-
-workflow.run()`);
+  const [code, setCode] = useState(DEFAULT_CODE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
@@ -320,6 +325,12 @@ workflow.run()`);
       setAgentOutputs(nextAgentOutputs);
       setWorkflowResult(nextWorkflowResult);
 
+      const sessionTimeout = snapshot.settings?.timeout;
+      if (typeof sessionTimeout === 'number' && sessionTimeout > 0)
+      {
+        setTimeoutSeconds(sessionTimeout);
+      }
+
       const parsedStartedAt =
         typeof snapshot.startedAt === 'string'
           ? Date.parse(snapshot.startedAt)
@@ -424,14 +435,42 @@ workflow.run()`);
 
   useEffect(() =>
   {
-    void axios.get<{ timeout: number }>('http://localhost:8000/settings')
-      .then((res) => setTimeoutSeconds(res.data.timeout))
-      .catch(() => {});
-
-    if (currentSessionIdRef.current !== null)
+    const ensureSession = async () =>
     {
-      void loadSession(currentSessionIdRef.current);
-    }
+      const storedId = readStoredSessionId();
+      if (storedId !== null)
+      {
+        await loadSession(storedId);
+        if (currentSessionIdRef.current === storedId)
+        {
+          return;
+        }
+      }
+
+      try
+      {
+        const createRes = await axios.post<{ sessionId: string }>('http://localhost:8000/sessions/create');
+        const newId = createRes.data.sessionId;
+        if (typeof newId === 'string' && newId !== '')
+        {
+          persistCurrentSessionId(newId);
+          await loadSession(newId);
+        }
+      }
+      catch
+      {
+        setLogs((prev) => [
+          ...prev,
+          {
+            timestamp: new Date().toISOString(),
+            level: 'error',
+            message: 'Error: Failed to create session.',
+          },
+        ]);
+      }
+    };
+
+    void ensureSession();
 
     return () =>
     {
@@ -442,11 +481,54 @@ workflow.run()`);
     };
   }, []);
 
+  const handleNewSession = async () =>
+  {
+    try
+    {
+      const createRes = await axios.post<{ sessionId: string }>('http://localhost:8000/sessions/create');
+      const newId = createRes.data.sessionId;
+      if (typeof newId !== 'string' || newId === '')
+      {
+        throw new Error('Invalid session ID');
+      }
+      persistCurrentSessionId(newId);
+      clearSessionSnapshot();
+      setLogs([]);
+      setCode(DEFAULT_CODE);
+      lastSyncedCodeRef.current = DEFAULT_CODE;
+      setEditorActiveTab('code');
+      await loadSession(newId);
+    }
+    catch
+    {
+      setLogs((prev) => [
+        ...prev,
+        {
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          message: 'Error: Failed to create session.',
+        },
+      ]);
+    }
+  };
+
   const handleRunAgent = async () =>
   {
+    if (currentSessionId === null)
+    {
+      setLogs((prev) => [
+        ...prev,
+        {
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          message: 'Error: No session. Create a session first.',
+        },
+      ]);
+      return;
+    }
+
     setLogs([]);
     clearSessionSnapshot();
-    persistCurrentSessionId(null);
     setIsRunning(true);
     workflowStartTimeRef.current = Date.now();
     abortControllerRef.current = new AbortController();
@@ -467,6 +549,7 @@ workflow.run()`);
       const response = await axios.post('http://localhost:8000/run',
       {
         code,
+        sessionId: currentSessionId,
       },
       {
         signal,
@@ -760,47 +843,36 @@ workflow.run()`);
   return (
     <div className={styles.appShell}>
       <header className={styles.topBar}>
-        <h1 className={styles.appTitle}>Agent Lab</h1>
+        <div className={styles.topBarLeft}>
+          <AppMenu
+            onNew={handleNewSession}
+            onSettings={() => navigateTo('/settings')}
+            onClearLogs={() => setLogs([])}
+          />
+          <h1 className={styles.appTitle}>Agent Lab</h1>
+        </div>
         <div className={styles.topBarActions}>
           {pathname === '/settings' ? (
             <Button variant="secondary" onClick={() => navigateTo('/')} icon={<ArrowLeft size={18} />}>
               Back To Lab
             </Button>
           ) : (
-            <>
-              <Button
-                variant="run"
-                onClick={isWorkflowActive ? handleStopWorkflow : handleRunAgent}
-                icon={!isWorkflowActive ? <Play size={16} /> : undefined}
-                showSpinner={isWorkflowActive}
-                elapsedTime={isWorkflowActive ? formatElapsedSeconds(workflowElapsedSeconds) : undefined}
-              >
-                {isWorkflowActive ? 'Stop Workflow' : 'Run Workflow'}
-              </Button>
-              <Button
-                variant="clearLogs"
-                onClick={() => setLogs([])}
-                icon={<Trash2 size={18} />}
-                title="Clear Logs"
-              >
-                {''}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => navigateTo('/settings')}
-                icon={<Settings size={18} />}
-                title="Settings"
-              >
-                {''}
-              </Button>
-            </>
+            <Button
+              variant="run"
+              onClick={isWorkflowActive ? handleStopWorkflow : handleRunAgent}
+              icon={!isWorkflowActive ? <Play size={16} /> : undefined}
+              showSpinner={isWorkflowActive}
+              elapsedTime={isWorkflowActive ? formatElapsedSeconds(workflowElapsedSeconds) : undefined}
+            >
+              {isWorkflowActive ? 'Stop Workflow' : 'Run Workflow'}
+            </Button>
           )}
         </div>
       </header>
 
       {pathname === '/settings' ? (
         <div className={styles.contentArea}>
-          <SettingsPage />
+          <SettingsPage sessionId={currentSessionId} />
         </div>
       ) : (
         <div className={styles.contentArea} ref={contentAreaRef}>
@@ -843,7 +915,6 @@ workflow.run()`);
                   workflowResult={workflowResult}
                   timeoutSeconds={timeoutSeconds}
                   onShowAgentResults={(agentName) => setEditorActiveTab(`agent:${agentName}`)}
-                  onShowWorkflowResult={() => setEditorActiveTab('workflow-result')}
                 />
               </section>
             </div>

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 import time
+from typing import Any
 
 import httpx
 from storage import load_settings
@@ -37,9 +38,11 @@ class OllamaInterface:
         base_url: str | None = None,
         timeout: float | None = None,
         default_model: str | None = None,
+        settings: dict[str, Any] | None = None,
     ) -> None:
-        settings = load_settings()
-        llm_server = str(settings.get("llm_server", "http://localhost:11434"))
+        if settings is None:
+            settings = load_settings()
+        llm_server = str(settings.get("llm_server", "http://192.168.129.11:11434"))
         self.base_url = base_url or _normalize_llm_server_url(llm_server)
         self.timeout = timeout if timeout is not None else float(settings.get("timeout", 240.0))
         self.default_model = default_model or str(settings.get("model", "qwen3:4b"))

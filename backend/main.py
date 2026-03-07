@@ -10,18 +10,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from llm import list_available_ollama_models
+from llm import OllamaInterface, list_available_ollama_models
 from runtime import Agent, Workflow, WorkflowRunner
-from storage import load_settings, save_settings
 from tools import (
+    create_session,
+    get_session_settings,
+    get_workflow_run_id,
     get_workflow_session_id,
     initialize_workflow_session,
     read_session_code,
     read_session_result_file,
     read_workflow_snapshot,
     record_agent_output,
+    set_workflow_run_id,
     set_workflow_session_id,
     sync_workflow_event,
+    update_session_settings,
     write_session_code,
 )
 from workflow_state import cancel_requested
@@ -94,6 +98,7 @@ manager = ConnectionManager()
 
 class RunRequest(BaseModel):
     code: str
+    sessionId: str
 
 
 class SessionCodeUpdateRequest(BaseModel):
@@ -126,8 +131,10 @@ async def emit_event(
     round_number: int | None = None,
     agent_order: list[str] | None = None,
     session_id: str | None = None,
+    run_id: str | None = None,
 ) -> None:
     resolved_session_id = session_id or get_workflow_session_id()
+    resolved_run_id = run_id or get_workflow_run_id()
     payload = (
         {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -151,6 +158,9 @@ async def emit_event(
 
     if resolved_session_id is not None:
         payload["sessionId"] = resolved_session_id
+
+    if resolved_run_id is not None:
+        payload["runId"] = resolved_run_id
 
     sync_workflow_event(
         event_type=event_type,
@@ -183,6 +193,7 @@ async def emit_agent_event(
 
 async def emit_agent_output(agent_name: str, output: str) -> None:
     session_id = get_workflow_session_id()
+    run_id = get_workflow_run_id()
     payload: dict[str, Any] = (
         {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -194,6 +205,8 @@ async def emit_agent_output(agent_name: str, output: str) -> None:
     )
     if session_id is not None:
         payload["sessionId"] = session_id
+    if run_id is not None:
+        payload["runId"] = run_id
 
     record_agent_output(agent_name=agent_name, session_id=session_id)
     await manager.broadcast(payload)
@@ -206,9 +219,19 @@ def health() -> dict[str, str]:
     }
 
 
-@app.get("/settings")
-async def get_settings() -> dict[str, Any]:
-    settings = load_settings()
+@app.post("/sessions/create")
+def create_session_endpoint() -> dict[str, str]:
+    session_id = create_session()
+    return {"sessionId": session_id}
+
+
+@app.get("/sessions/{session_id}/settings")
+async def get_session_settings_endpoint(session_id: str) -> dict[str, Any]:
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    settings = get_session_settings(session_id)
     llm_server = _normalize_llm_server(str(settings.get("llm_server", "http://localhost:11434")))
 
     try:
@@ -269,8 +292,12 @@ async def get_session_result_file(session_id: str, filename: str) -> dict[str, s
     }
 
 
-@app.put("/settings")
-async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
+@app.put("/sessions/{session_id}/settings")
+async def update_session_settings_endpoint(session_id: str, request: SettingsUpdateRequest) -> dict[str, Any]:
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
     model = request.model.strip()
     timeout = float(request.timeout)
     llm_server = request.llm_server.strip()
@@ -293,15 +320,17 @@ async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
             "message": "LLM server cannot be empty.",
         }
 
-    updated_settings = save_settings(
+    update_session_settings(
         {
             "provider": "ollama",
             "model": model,
             "timeout": timeout,
             "llm_server": _normalize_llm_server(llm_server),
-        }
+        },
+        session_id=session_id,
     )
 
+    updated_settings = get_session_settings(session_id)
     return {
         "status": "ok",
         "settings": updated_settings,
@@ -402,6 +431,20 @@ async def stop_workflow() -> dict[str, str]:
 @app.post("/run")
 async def run_agent(request: RunRequest) -> dict[str, Any]:
     cancel_requested.clear()
+    session_id = (request.sessionId or "").strip()[:6]
+    if not session_id:
+        return {
+            "status": "error",
+            "message": "Session ID is required.",
+        }
+
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        return {
+            "status": "error",
+            "message": "Session not found.",
+        }
+
     # region agent log
     _debug_log(
         "H1",
@@ -410,6 +453,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
             "codeLength": len(request.code),
             "hasWorkflowRun": "workflow.run()" in request.code,
             "hasAgentOutputReference": ".output" in request.code,
+            "sessionId": session_id,
         },
     )
     # endregion
@@ -474,6 +518,8 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
         start_agent=workflow_config["entryAgent"],
         max_rounds=workflow_config["maxRounds"],
     )
+    session_settings = get_session_settings(session_id)
+    llm_interface = OllamaInterface(settings=session_settings)
     agents = (
         [
             Agent(
@@ -485,6 +531,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
                     if config.get("inputSourceVariable") is not None
                     else None
                 ),
+                llm=llm_interface,
             )
             for config in selected_agent_configs
         ]
@@ -533,9 +580,10 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
     # endregion
     import uuid
 
-    session_id = uuid.uuid4().hex[:6]
+    run_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
-    initialize_workflow_session(session_id, agent_order)
+    set_workflow_run_id(run_id)
+    initialize_workflow_session(session_id, agent_order, run_id=run_id)
     write_session_code(request.code, session_id)
 
     for agent in agents:
@@ -550,10 +598,11 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
 
     await emit_event(
         event_type="workflow_started",
-        message="Workflow started.",
+        message=f"Workflow {session_id}-{run_id} started.",
         state="running",
         agent_order=agent_order,
         session_id=session_id,
+        run_id=run_id,
     )
     try:
         await runner.run()
@@ -561,9 +610,11 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
             "status": "ok",
             "message": f"Workflow finished for {len(agents)} agent(s).",
             "sessionId": session_id,
+            "runId": run_id,
         }
     finally:
         set_workflow_session_id(None)
+        set_workflow_run_id(None)
 
 
 @app.websocket("/ws/logs")

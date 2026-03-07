@@ -12,7 +12,12 @@ type SettingsResponse =
   availableModels: string[];
 };
 
-function SettingsPage()
+type SettingsPageProps =
+{
+  sessionId: string | null;
+};
+
+function SettingsPage({ sessionId }: SettingsPageProps)
 {
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('');
@@ -26,15 +31,23 @@ function SettingsPage()
 
   useEffect(() =>
   {
+    if (sessionId === null)
+    {
+      setIsLoading(false);
+      return;
+    }
+
     const loadSettings = async () =>
     {
       try
       {
-        const response = await axios.get<SettingsResponse>('http://localhost:8000/settings');
+        const response = await axios.get<SettingsResponse>(
+          `http://localhost:8000/sessions/${sessionId}/settings`,
+        );
         setProvider(response.data.provider);
         setModel(response.data.model);
         setTimeoutValue(String(response.data.timeout));
-        setLlmServer(response.data.llm_server ?? 'http://localhost:11434');
+        setLlmServer(response.data.llm_server ?? 'http://192.168.129.11:11434');
         setAvailableModels(response.data.availableModels);
       }
       catch
@@ -48,22 +61,29 @@ function SettingsPage()
     };
 
     void loadSettings();
-  }, []);
+  }, [sessionId]);
 
   const handleSave = async () =>
   {
+    if (sessionId === null)
+    {
+      return;
+    }
+
     setErrorMessage(null);
     setSuccessMessage(null);
     setIsSaving(true);
 
     try
     {
-      const response = await axios.put('http://localhost:8000/settings',
-      {
-        model,
-        timeout: Number(timeout),
-        llm_server: llmServer,
-      });
+      const response = await axios.put(
+        `http://localhost:8000/sessions/${sessionId}/settings`,
+        {
+          model,
+          timeout: Number(timeout),
+          llm_server: llmServer,
+        },
+      );
 
       if (response.data.status === 'error')
       {
@@ -82,6 +102,16 @@ function SettingsPage()
       setIsSaving(false);
     }
   };
+
+  if (sessionId === null)
+  {
+    return (
+      <section className={styles.settingsPanel}>
+        <div className={styles.settingsHeader}>Settings</div>
+        <div className={styles.settingsBody}>No session loaded.</div>
+      </section>
+    );
+  }
 
   if (isLoading)
   {

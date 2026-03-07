@@ -4,12 +4,18 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from storage import DEFAULT_SETTINGS
+
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_ROOT = WORKSPACE_ROOT / "results"
 
 _workflow_session_id: ContextVar[str | None] = ContextVar(
     "workflow_session_id",
+    default=None,
+)
+_workflow_run_id: ContextVar[str | None] = ContextVar(
+    "workflow_run_id",
     default=None,
 )
 _workflow_agent_name: ContextVar[str | None] = ContextVar(
@@ -43,6 +49,23 @@ def get_workflow_session_id() -> str | None:
 
 def set_workflow_session_id(session_id: str | None) -> None:
     _workflow_session_id.set(_normalize_session_id(session_id))
+
+
+def _normalize_run_id(run_id: str | None) -> str | None:
+    if run_id is None:
+        return None
+    trimmed = run_id.strip()
+    if trimmed == "":
+        return None
+    return trimmed[:6]
+
+
+def get_workflow_run_id() -> str | None:
+    return _normalize_run_id(_workflow_run_id.get())
+
+
+def set_workflow_run_id(run_id: str | None) -> None:
+    _workflow_run_id.set(_normalize_run_id(run_id))
 
 
 def set_workflow_context(agent_name: str | None, round_number: int | None) -> None:
@@ -90,12 +113,23 @@ def _default_agent_snapshot(agent_name: str) -> dict[str, Any]:
     }
 
 
-def _default_workflow_snapshot(session_id: str, agent_order: list[str] | None = None) -> dict[str, Any]:
+def _default_settings() -> dict[str, Any]:
+    return dict(DEFAULT_SETTINGS)
+
+
+def _default_workflow_snapshot(
+    session_id: str,
+    agent_order: list[str] | None = None,
+    run_id: str | None = None,
+    status: str = "running",
+) -> dict[str, Any]:
     now = _utc_now()
     ordered_agents = agent_order or []
     return {
         "sessionId": session_id,
-        "status": "running",
+        "runId": _normalize_run_id(run_id),
+        "status": status,
+        "settings": _default_settings(),
         "agentOrder": ordered_agents,
         "currentAgent": None,
         "currentRound": 0,
@@ -146,6 +180,14 @@ def read_workflow_snapshot(session_id: str | None = None) -> dict[str, Any] | No
         snapshot["agents"] = {}
     if "status" not in snapshot or not isinstance(snapshot["status"], str):
         snapshot["status"] = "running"
+    if "runId" not in snapshot:
+        snapshot["runId"] = None
+    if "settings" not in snapshot or not isinstance(snapshot["settings"], dict):
+        snapshot["settings"] = _default_settings()
+    else:
+        merged = dict(_default_settings())
+        merged.update(snapshot["settings"])
+        snapshot["settings"] = merged
     if "workflowResult" not in snapshot:
         snapshot["workflowResult"] = None
     if "workflowResultFile" not in snapshot:
@@ -167,12 +209,83 @@ def read_workflow_snapshot(session_id: str | None = None) -> dict[str, Any] | No
     return snapshot
 
 
-def initialize_workflow_session(session_id: str, agent_order: list[str]) -> None:
+def get_session_settings(session_id: str | None = None) -> dict[str, Any]:
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        return _default_settings()
+    settings = snapshot.get("settings")
+    if not isinstance(settings, dict):
+        return _default_settings()
+    merged = dict(_default_settings())
+    merged.update(settings)
+    return merged
+
+
+def update_session_settings(
+    settings: dict[str, Any],
+    session_id: str | None = None,
+) -> None:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return
+
+    def apply(snapshot: dict[str, Any]) -> None:
+        current = snapshot.get("settings")
+        if not isinstance(current, dict):
+            current = _default_settings()
+        merged = dict(current)
+        merged.update(settings)
+        snapshot["settings"] = merged
+
+    update_workflow_snapshot(apply, resolved_session_id)
+
+
+def create_session() -> str:
+    import uuid
+
+    session_id = uuid.uuid4().hex[:6]
+    snapshot = _default_workflow_snapshot(
+        session_id,
+        agent_order=[],
+        run_id=None,
+        status="idle",
+    )
+    _write_workflow_snapshot(snapshot, session_id)
+    return session_id
+
+
+def initialize_workflow_session(
+    session_id: str,
+    agent_order: list[str],
+    run_id: str | None = None,
+) -> None:
     resolved_session_id = _normalize_session_id(session_id)
     if resolved_session_id is None:
         return
 
-    snapshot = _default_workflow_snapshot(resolved_session_id, agent_order)
+    existing = read_workflow_snapshot(resolved_session_id)
+    if existing is not None and run_id is not None:
+        snapshot = _default_workflow_snapshot(
+            resolved_session_id,
+            agent_order,
+            run_id=run_id,
+            status="running",
+        )
+        snapshot["settings"] = existing.get("settings")
+        if not isinstance(snapshot["settings"], dict):
+            snapshot["settings"] = _default_settings()
+    else:
+        snapshot = _default_workflow_snapshot(
+            resolved_session_id,
+            agent_order,
+            run_id=run_id,
+            status="running" if run_id else "idle",
+        )
+        if existing is not None:
+            existing_settings = existing.get("settings")
+            if isinstance(existing_settings, dict):
+                snapshot["settings"] = existing_settings
+
     _write_workflow_snapshot(snapshot, resolved_session_id)
 
 
@@ -378,13 +491,10 @@ def _resolve_path(filename: str, for_write: bool = False) -> Path:
             agent_name = _sanitize_agent_name(_workflow_agent_name.get() or "agent")
             round_number = _workflow_round_number.get()
             round_str = str(round_number) if round_number is not None else "0"
-            base_name = f"{session_id}_{agent_name}_{round_str}"
+            prefix = get_workflow_run_id() or session_id
+            base_name = f"{prefix}_{agent_name}_{round_str}"
             return RESULTS_ROOT / session_id / _normalize_results_path(Path(base_name))
         target_path = _normalize_results_path(target_path)
-        stem_parts = target_path.stem.split("_")
-        if len(stem_parts) >= 3 and len(stem_parts[0]) >= 6:
-            read_session_id = stem_parts[0][:6]
-            return RESULTS_ROOT / read_session_id / target_path.name
         workflow_snapshot = read_workflow_snapshot(session_id)
         current_agent_name = _workflow_agent_name.get()
         if (
@@ -397,7 +507,8 @@ def _resolve_path(filename: str, for_write: bool = False) -> Path:
                 last_result_file = agent_snapshot.get("lastResultFile")
                 if isinstance(last_result_file, str) and last_result_file != "":
                     return RESULTS_ROOT / session_id / last_result_file
-        return RESULTS_ROOT / session_id / f"{session_id}_{target_path.name}"
+        prefix = get_workflow_run_id() or session_id
+        return RESULTS_ROOT / session_id / f"{prefix}_{target_path.name}"
     return _normalize_results_path(RESULTS_ROOT / target_path)
 
 
