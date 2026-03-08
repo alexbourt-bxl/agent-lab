@@ -313,7 +313,7 @@ researcher = Researcher(
 )
 
 analyst = Analyst(
-    goal="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+    task="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
     input=researcher.output
 )
 '''
@@ -535,7 +535,7 @@ def sync_workflow_event(
             agent_snapshot["message"] = message
             if round_number is not None:
                 agent_snapshot["round"] = round_number
-            if state in {"thinking", "working"}:
+            if state in {"working", "executing"}:
                 if previous_state != state or agent_snapshot.get("stepStartedAt") is None:
                     agent_snapshot["stepStartedAt"] = now
             elif state is not None:
@@ -864,6 +864,12 @@ from .search_web import SearchWeb
 
 ReadFile = create_read_file(read_file_tool)
 WriteFile = create_write_file(write_file_tool)
+
+TOOL_NAME_TO_DISPLAY: dict[str, str] = {
+    "read_file_tool": "ReadFile",
+    "write_file_tool": "WriteFile",
+    "web_search_tool": "SearchWeb",
+}
 
 TOOL_REGISTRY: dict[str, type] = {
     "ReadFile": ReadFile,

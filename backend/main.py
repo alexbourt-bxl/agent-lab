@@ -441,8 +441,10 @@ def extract_agent_configs(code: str) -> list[dict[str, Any]]:
         for m in re.finditer(pattern, code):
             variable = m.group(1)
             arguments = m.group(2)
-            goal = extract_string_argument(arguments, "goal")
-            if not goal:
+            task = extract_string_argument(arguments, "task") or extract_string_argument(
+                arguments, "goal"
+            )
+            if not task:
                 continue
             configs.append(
                 {
@@ -453,7 +455,7 @@ def extract_agent_configs(code: str) -> list[dict[str, Any]]:
                         or class_name
                     ),
                     "role": str(classes_by_name[class_name]["role"] or ""),
-                    "goal": goal,
+                    "task": task,
                     "inputSourceVariable": extract_input_source_variable(
                         arguments
                     ),
@@ -514,7 +516,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
             "status": "error",
             "message": (
                 "Could not extract any class-based Agent definitions "
-                "(class X(Agent): ... variable = X(goal=..., input=...))."
+                "(class X(Agent): ... variable = X(task=..., input=...))."
             ),
         }
 
@@ -549,7 +551,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
     agents = [
         Agent(
             name=str(config["name"]),
-            goal=str(config["goal"]),
+            task=str(config["task"]),
             role=str(config.get("role") or ""),
             output_file=class_name_to_output_pattern(config["className"]),
             input_source=(
@@ -637,7 +639,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
         await emit_agent_event(
             agent_name=agent.name,
             event_type="state",
-            message=f"Instantiated agent '{agent.name}' with goal '{agent.goal}'.",
+            message=f"Instantiated agent '{agent.name}' with task '{agent.task}'.",
             state="waiting_for_turn",
             round_number=0,
         )

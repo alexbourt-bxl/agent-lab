@@ -226,7 +226,7 @@ type AgentCodeConfig =
   role: string;
   tools: string;
   variableName: string;
-  goal: string;
+  task: string;
   input: string;
 };
 
@@ -238,7 +238,7 @@ class ${config.className}(Agent):
     role = "${config.role}"
     tools = ${config.tools}
 `;
-  const instantiation = `${config.variableName} = ${config.className}(\n    goal="${config.goal}",\n    input=${config.input}\n)`;
+  const instantiation = `${config.variableName} = ${config.className}(\n    task="${config.task}",\n    input=${config.input}\n)`;
   return { classDef, instantiation };
 }
 
@@ -267,7 +267,7 @@ function addAgentSkeletonToCode(code: string): { code: string; newAgentName: str
     role: '',
     tools: '[ReadFile, WriteFile]',
     variableName,
-    goal: '...',
+    task: '...',
     input: '...',
   });
 
@@ -307,7 +307,7 @@ function buildDefaultCode(): string
     role: 'Market researcher specializing in SaaS and B2B trends.',
     tools: '[ReadFile, WriteFile]',
     variableName: 'researcher',
-    goal: "Find and refine a promising SaaS idea based on analyst feedback",
+    task: "Find and refine a promising SaaS idea based on analyst feedback",
     input: 'analyst.output',
   });
   const analyst = createAgentCode(
@@ -317,7 +317,7 @@ function buildDefaultCode(): string
     role: "Critical analyst who identifies flaws and improvement opportunities.",
     tools: '[ReadFile, WriteFile]',
     variableName: 'analyst',
-    goal: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+    task: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
     input: 'researcher.output',
   });
   return (
@@ -1016,7 +1016,7 @@ function App()
   }, [logHeightPercent]);
 
   const hasActiveStep = Object.values(agentStatuses).some(
-    (s) => s.state === 'thinking' || s.state === 'working',
+    (s) => s.state === 'working' || s.state === 'executing',
   );
   const isWorkflowActive = isRunning || hasActiveStep;
 

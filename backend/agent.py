@@ -19,7 +19,7 @@ class Agent:
     def __init__(
         self,
         name: str,
-        goal: str,
+        task: str,
         role: str = "",
         input: str | None = None,
         output: str = "",
@@ -29,7 +29,7 @@ class Agent:
         tools: list | None = None,
     ) -> None:
         self.name = name
-        self.goal = goal
+        self.task = task
         self.role = role
         self.input = input
         self.output = output
@@ -83,8 +83,8 @@ class Agent:
         await emit_agent_event(
             agent_name=self.name,
             event_type="state",
-            state="thinking",
-            message=f"Thinking...",
+            state="working",
+            message=f"Working...",
             round_number=round_number,
         )
 
@@ -124,7 +124,7 @@ class Agent:
         await emit_agent_event(
             agent_name=self.name,
             event_type="thought",
-            state="thinking",
+            state="working",
             message=thought,
             round_number=round_number,
         )
@@ -138,7 +138,7 @@ class Agent:
             await emit_agent_event(
                 agent_name=self.name,
                 event_type="tool_result",
-                state="thinking",
+                state="working",
                 message=tool_result,
                 round_number=round_number,
             )
@@ -243,16 +243,16 @@ class Agent:
 
         return (
             f"Agent name: {self.name}\n"
-            f"Goal: {self.goal}\n"
+            f"Task: {self.task}\n"
             f"Current input: {self.input if self.input else 'None'}\n"
             f"Current memory summary: {self._summarize_memory()}\n"
             f"Available tools:\n{self._format_tools_for_prompt()}\n"
             f"Other agents in the workflow: {teammate_summary}\n"
             "Decide the next best action for this agent.\n"
             "If your role is to review, critique, or analyze another agent's output, identify faults clearly and hand the work back until you are satisfied.\n"
-            "Only set done to true when your own goal is fully satisfied. If another agent still needs to revise work, keep done false.\n"
-            "Use the available tools when they help complete the goal.\n"
-            "If the goal involves creating a file, use write_file_tool and prefer markdown filenames. Relative filenames are written into the session directory.\n"
+            "Only set done to true when your own task is fully satisfied. If another agent still needs to revise work, keep done false.\n"
+            "Use the available tools when they help complete the task.\n"
+            "If the task involves creating a file, use write_file_tool and prefer markdown filenames. Relative filenames are written into the session directory.\n"
             "Always write your final deliverable to the session folder (e.g. output.md, refined_idea.md) before setting done to true, so the output is visible in the UI.\n"
             "Prefer responding with a JSON block inside ```json fences using this shape:\n"
             "```json\n"
@@ -270,7 +270,7 @@ class Agent:
             "Use next_agent only if another agent should act after you.\n"
             "In multi-agent review workflows, the reviewing agent should usually be the one to set done to true after approval.\n"
             "If no tool is needed, you may omit tool and arguments.\n"
-            "If you do not use JSON, include STOP when the goal is complete."
+            "If you do not use JSON, include STOP when the task is complete."
         )
 
     def _extract_structured_output(self, output: str) -> dict[str, Any] | None:
@@ -344,11 +344,14 @@ class Agent:
         if tool is None or tool.handler is None:
             return f"Unknown tool: {tool_name}"
 
+        from tools import TOOL_NAME_TO_DISPLAY
+
+        display_name = TOOL_NAME_TO_DISPLAY.get(tool_name, tool_name)
         await emit_agent_event(
             agent_name=self.name,
             event_type="tool_call",
-            state="working",
-            message=f"{tool_name} with arguments {arguments}",
+            state="executing",
+            message=f"Using {display_name} tool",
             round_number=round_number,
         )
 
