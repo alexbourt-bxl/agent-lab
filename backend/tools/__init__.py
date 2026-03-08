@@ -113,6 +113,18 @@ def _agent_name_to_kebab(name: str) -> str:
     return "".join(result).replace("--", "-").strip("-") or "agent"
 
 
+def class_name_to_output_pattern(class_name: str) -> str:
+    """Derive output file pattern from class name (e.g. Researcher -> researcher_{round}.md)."""
+    return f"{_agent_name_to_kebab(class_name)}_{{round}}.md"
+
+
+def kebab_to_class_name(kebab: str) -> str:
+    """Convert kebab filename stem to class name (e.g. researcher -> Researcher)."""
+    if not kebab:
+        return "Agent"
+    return "".join(part.capitalize() for part in kebab.split("-"))
+
+
 def get_workflow_state_path(session_id: str | None = None) -> Path:
     return get_session_directory(session_id) / WORKFLOW_STATE_FILENAME
 
@@ -285,6 +297,28 @@ def update_session_settings(
     update_workflow_snapshot(apply, resolved_session_id)
 
 
+DEFAULT_SESSION_CODE = '''class Researcher(Agent):
+    name = "Researcher"
+    role = "Market researcher specializing in SaaS and B2B trends."
+    tools = [ReadFile, WriteFile]
+
+class Analyst(Agent):
+    name = "Analyst"
+    role = "Critical analyst who identifies flaws and improvement opportunities."
+    tools = [ReadFile, WriteFile]
+
+researcher = Researcher(
+    goal="Find and refine a promising SaaS idea based on analyst feedback",
+    input=analyst.output
+)
+
+analyst = Analyst(
+    goal="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+    input=researcher.output
+)
+'''
+
+
 def create_session() -> str:
     import uuid
 
@@ -296,6 +330,16 @@ def create_session() -> str:
         status="idle",
     )
     _write_workflow_snapshot(snapshot, session_id)
+    write_session_code(DEFAULT_SESSION_CODE, session_id)
+    initialize_workflow_session(
+        session_id,
+        agent_order=["Researcher", "Analyst"],
+        run_id=None,
+        agent_output_files={
+            "Researcher": class_name_to_output_pattern("Researcher"),
+            "Analyst": class_name_to_output_pattern("Analyst"),
+        },
+    )
     return session_id
 
 
@@ -381,17 +425,22 @@ def initialize_workflow_session(
                 snapshot["settings"] = existing_settings
 
     session_dir = get_session_directory(resolved_session_id)
-    for agent_name in agent_order:
-        output_file = output_files.get(agent_name, "{round}.md")
+    old_agent_order = existing.get("agentOrder", []) if existing else []
+    for i, agent_name in enumerate(agent_order):
+        output_file = output_files.get(
+            agent_name,
+            class_name_to_output_pattern(agent_name),
+        )
         _ensure_agent_snapshot(snapshot, agent_name)
         snapshot["agents"][agent_name]["outputFile"] = output_file
 
-        if existing is not None:
-            old_agent = existing.get("agents", {}).get(agent_name)
+        if existing is not None and session_dir.exists():
+            old_agent_name = old_agent_order[i] if i < len(old_agent_order) else None
+            old_agent = existing.get("agents", {}).get(old_agent_name or agent_name)
             old_pattern = old_agent.get("outputFile", "{round}.md") if isinstance(old_agent, dict) else "{round}.md"
-            if old_pattern != output_file and session_dir.exists():
-                old_result_files = old_agent.get("resultFiles", []) if isinstance(old_agent, dict) else []
-                old_last = old_agent.get("lastResultFile") if isinstance(old_agent, dict) else None
+            if old_pattern != output_file and old_agent is not None:
+                old_result_files = old_agent.get("resultFiles", [])
+                old_last = old_agent.get("lastResultFile")
                 new_result_files, new_last = _rename_agent_result_files(
                     session_dir,
                     old_pattern,
@@ -681,26 +730,32 @@ def read_session_result_file(session_id: str, filename: str) -> str:
 
 
 def _apply_agent_output_rename(session_id: str, filename: str, content: str) -> None:
-    """If an agent file's output pattern changed, rename result files and update snapshot."""
+    """When an agent class is renamed, rename result files to match the new class name."""
     import re
+
     if not filename.endswith(".py") or filename == "workflow.py":
         return
-    output_match = re.search(r'output\s*=\s*["\']([^"\']*)["\']', content)
-    name_match = re.search(r'name\s*=\s*["\']([^"\']*)["\']', content)
-    if not output_match or not name_match:
+    old_class_name = kebab_to_class_name(Path(filename).stem)
+    class_match = re.search(r"class\s+(\w+)\s*\(\s*Agent\s*\)", content)
+    if not class_match:
         return
-    new_pattern = output_match.group(1)
-    agent_name = name_match.group(1).strip()
-    if not agent_name:
+    new_class_name = class_match.group(1)
+    if old_class_name == new_class_name:
         return
+    old_pattern = class_name_to_output_pattern(old_class_name)
+    new_pattern = class_name_to_output_pattern(new_class_name)
     snapshot = read_workflow_snapshot(session_id)
     if snapshot is None:
         return
-    agent_snapshot = snapshot.get("agents", {}).get(agent_name)
-    if not isinstance(agent_snapshot, dict):
-        return
-    old_pattern = agent_snapshot.get("outputFile", "{round}.md")
-    if old_pattern == new_pattern:
+    agents = snapshot.get("agents", {})
+    agent_name = None
+    agent_snapshot = None
+    for name, data in agents.items():
+        if isinstance(data, dict) and data.get("outputFile") == old_pattern:
+            agent_name = name
+            agent_snapshot = data
+            break
+    if agent_name is None or agent_snapshot is None:
         return
     session_dir = get_session_directory(session_id)
     if not session_dir.exists():

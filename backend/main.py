@@ -14,6 +14,7 @@ from llm import OllamaInterface, list_available_ollama_models
 from agent import Agent
 from runtime import WorkflowRunner
 from tools import (
+    class_name_to_output_pattern,
     create_session,
     delete_session_file,
     get_session_settings,
@@ -393,14 +394,11 @@ def _extract_class_attrs(
     attrs: dict[str, Any] = {}
     name_match = re.search(r'name\s*=\s*["\']([^"\']*)["\']', body)
     role_match = re.search(r'role\s*=\s*["\']([^"\']*)["\']', body)
-    output_match = re.search(r'output\s*=\s*["\']([^"\']*)["\']', body)
     tools_match = re.search(r"tools\s*=\s*\[([^\]]+)\]", body)
     if name_match:
         attrs["name"] = name_match.group(1)
     if role_match:
         attrs["role"] = role_match.group(1)
-    if output_match:
-        attrs["output"] = output_match.group(1)
     if tools_match:
         tool_names = [
             t.strip() for t in tools_match.group(1).split(",")
@@ -434,7 +432,6 @@ def extract_agent_configs(code: str) -> list[dict[str, Any]]:
         classes_by_name[class_name] = {
             "name": attrs.get("name", class_name),
             "role": attrs.get("role", ""),
-            "output": attrs.get("output", "{round}.md"),
             "tools": attrs.get("tools", [ReadFile, WriteFile]),
         }
 
@@ -456,7 +453,6 @@ def extract_agent_configs(code: str) -> list[dict[str, Any]]:
                         or class_name
                     ),
                     "role": str(classes_by_name[class_name]["role"] or ""),
-                    "output": str(classes_by_name[class_name].get("output", "{round}.md")),
                     "goal": goal,
                     "inputSourceVariable": extract_input_source_variable(
                         arguments
@@ -555,7 +551,7 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
             name=str(config["name"]),
             goal=str(config["goal"]),
             role=str(config.get("role") or ""),
-            output_file=str(config.get("output", "{round}.md")),
+            output_file=class_name_to_output_pattern(config["className"]),
             input_source=(
                 variable_to_name.get(str(config["inputSourceVariable"]))
                 if config.get("inputSourceVariable") is not None
@@ -629,7 +625,10 @@ async def run_agent(request: RunRequest) -> dict[str, Any]:
     run_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
     set_workflow_run_id(run_id)
-    agent_output_files = {c["name"]: c.get("output", "{round}.md") for c in agent_configs}
+    agent_output_files = {
+        c["name"]: class_name_to_output_pattern(c["className"])
+        for c in agent_configs
+    }
     initialize_workflow_session(session_id, agent_order, run_id=run_id, agent_output_files=agent_output_files)
     write_session_code(request.code, session_id)
 

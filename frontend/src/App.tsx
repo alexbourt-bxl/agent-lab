@@ -224,7 +224,6 @@ type AgentCodeConfig =
   className: string;
   displayName: string;
   role: string;
-  output: string;
   tools: string;
   variableName: string;
   goal: string;
@@ -237,7 +236,6 @@ function createAgentCode(config: AgentCodeConfig): { classDef: string; instantia
 class ${config.className}(Agent):
     name = "${config.displayName}"
     role = "${config.role}"
-    output = "${config.output}"
     tools = ${config.tools}
 `;
   const instantiation = `${config.variableName} = ${config.className}(\n    goal="${config.goal}",\n    input=${config.input}\n)`;
@@ -267,7 +265,6 @@ function addAgentSkeletonToCode(code: string): { code: string; newAgentName: str
     className,
     displayName,
     role: '',
-    output: '{round}.md',
     tools: '[ReadFile, WriteFile]',
     variableName,
     goal: '...',
@@ -308,7 +305,6 @@ function buildDefaultCode(): string
     className: 'Researcher',
     displayName: 'Researcher',
     role: 'Market researcher specializing in SaaS and B2B trends.',
-    output: 'researcher_{round}.md',
     tools: '[ReadFile, WriteFile]',
     variableName: 'researcher',
     goal: "Find and refine a promising SaaS idea based on analyst feedback",
@@ -319,7 +315,6 @@ function buildDefaultCode(): string
     className: 'Analyst',
     displayName: 'Analyst',
     role: "Critical analyst who identifies flaws and improvement opportunities.",
-    output: 'analyst_{round}.md',
     tools: '[ReadFile, WriteFile]',
     variableName: 'analyst',
     goal: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
