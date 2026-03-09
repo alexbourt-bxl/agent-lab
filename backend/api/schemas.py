@@ -9,6 +9,10 @@ class RunRequest(BaseModel):
     maxRounds: int | None = 8
 
 
+class StopRequest(BaseModel):
+    sessionId: str | None = None
+
+
 class SessionFileUpdateRequest(BaseModel):
     content: str
 

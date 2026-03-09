@@ -1,0 +1,9 @@
+{
+  "name": "agent-lab",
+  "private": true,
+  "description": "Local AI agent experimentation environment",
+  "scripts": {
+    "dev:backend": "cd backend && python main.py",
+    "dev:frontend": "cd frontend && npm run dev"
+  }
+}

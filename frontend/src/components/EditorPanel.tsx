@@ -3,6 +3,18 @@ import Editor from '@monaco-editor/react';
 import type { Monaco } from '@monaco-editor/react';
 import { Plus, X } from 'lucide-react';
 import { formatElapsedSeconds } from '../utils/formatElapsed';
+import {
+  readCodePaneWidth,
+  writeCodePaneWidth,
+} from '../persistence';
+import {
+  extractAgentClassCode,
+  extractWorkflowCode,
+  getTabLabel,
+  mergeAgentClassCodeIntoFullCode,
+  mergeWorkflowCodeIntoFullCode,
+  parseAgentConfigsFromCode,
+} from '../workflowCode';
 import styles from './EditorPanel.module.css';
 
 const AVAILABLE_TOOLS = ['ReadFile', 'WriteFile', 'SearchWeb'];
@@ -73,29 +85,6 @@ function handleEditorMount(_editor: unknown, monaco: Monaco): void
   registerToolsCompletionProvider(monaco);
 }
 
-const CODE_PANE_WIDTH_COOKIE = 'agent_lab_code_pane_width';
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-
-function readCodePaneWidth(): number
-{
-  if (typeof document === 'undefined')
-  {
-    return 50;
-  }
-  const entry = document.cookie.split('; ').find((e) => e.startsWith(`${CODE_PANE_WIDTH_COOKIE}=`));
-  if (!entry)
-  {
-    return 50;
-  }
-  const val = Number(entry.split('=').slice(1).join('='));
-  return Number.isNaN(val) ? 50 : Math.min(70, Math.max(30, val));
-}
-
-function writeCodePaneWidth(value: number): void
-{
-  document.cookie = `${CODE_PANE_WIDTH_COOKIE}=${value}; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax`;
-}
-
 type AgentStatus =
 {
   name: string;
@@ -124,143 +113,6 @@ type EditorPanelProps =
   onCloseAgentTab: (agentName: string) => void;
   onAddAgent: () => void;
 };
-
-function parseAgentConfigsFromCode(code: string): Array<{ name: string; className: string; variable: string }>
-{
-  const configs: Array<{ name: string; className: string; variable: string }> = [];
-  const classMatches = [...code.matchAll(/class (\w+)\(Agent\):\s*/g)];
-  const classesByName = new Map<string, { name: string }>();
-
-  for (let i = 0; i < classMatches.length; i++)
-  {
-    const className = classMatches[i][1];
-    const bodyStart = classMatches[i].index! + classMatches[i][0].length;
-    const bodyEnd = i + 1 < classMatches.length
-      ? classMatches[i + 1].index!
-      : code.length;
-    const nextClass = code.slice(bodyStart).match(/\nclass \w+\(Agent\)/);
-    const end = nextClass
-      ? bodyStart + nextClass.index!
-      : bodyEnd;
-    const body = code.slice(bodyStart, end);
-    const nameMatch = body.match(/name\s*=\s*["']([^"']*)["']/);
-    classesByName.set(className, {
-      name: nameMatch ? nameMatch[1].trim() : className,
-    });
-  }
-
-  for (const [className, attrs] of classesByName)
-  {
-    let variable = '';
-    const pattern = new RegExp(
-      `(\\w+)\\s*=\\s*${className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`,
-      'g',
-    );
-    let m;
-    while ((m = pattern.exec(code)) !== null)
-    {
-      const argsStart = m.index + m[0].length;
-      let depth = 1;
-      let argsEnd = argsStart;
-      for (let i = argsStart; i < code.length; i++)
-      {
-        if (code[i] === '(')
-        {
-          depth++;
-        }
-        else if (code[i] === ')')
-        {
-          depth--;
-          if (depth === 0)
-          {
-            argsEnd = i;
-            break;
-          }
-        }
-      }
-      const argumentsStr = code.slice(argsStart, argsEnd);
-      const goalMatch = argumentsStr.match(/goal\s*=\s*["']([^"']*)["']/);
-      if (goalMatch)
-      {
-        variable = m[1];
-        break;
-      }
-    }
-    configs.push({
-      name: attrs.name || className || 'Agent?',
-      className: className || 'Agent?',
-      variable: variable || className.charAt(0).toLowerCase() + className.slice(1),
-    });
-  }
-
-  configs.sort((a, b) =>
-  {
-    const instA = code.indexOf(`${a.variable} = ${a.className}`);
-    const instB = code.indexOf(`${b.variable} = ${b.className}`);
-    const idxA = instA >= 0 ? instA : code.indexOf(`class ${a.className}(Agent)`);
-    const idxB = instB >= 0 ? instB : code.indexOf(`class ${b.className}(Agent)`);
-    return idxA - idxB;
-  });
-  return configs;
-}
-
-function getTabLabel(config: { name: string; className: string }): string
-{
-  const trimmed = config.name.trim();
-  return trimmed || config.className || 'Agent?';
-}
-
-export function extractWorkflowCode(code: string): string
-{
-  const firstInst = code.match(/\n([A-Za-z_]\w*)\s*=\s*\w+\s*\(/);
-  if (firstInst && firstInst.index !== undefined)
-  {
-    return code.slice(firstInst.index).trimStart();
-  }
-  return '';
-}
-
-export function extractAgentClassCode(code: string, className: string): string
-{
-  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = code.match(
-    new RegExp(
-      `(class ${escaped}\\(Agent\\):[\\s\\S]*?)(?=\\nclass \\w+\\(Agent\\)|\\n[A-Za-z_]\\w*\\s*=|$)`,
-    ),
-  );
-  return match ? match[1].trimEnd() : '';
-}
-
-function mergeWorkflowCodeIntoFullCode(fullCode: string, workflowCode: string): string
-{
-  const firstInst = fullCode.match(/\n([A-Za-z_]\w*)\s*=\s*\w+\s*\(/);
-  if (!firstInst || firstInst.index === undefined)
-  {
-    return fullCode.trimEnd() + (fullCode.endsWith('\n') ? '' : '\n') + workflowCode + '\n';
-  }
-  const workflowStart = firstInst.index;
-  const before = fullCode.slice(0, workflowStart);
-  const trailing = fullCode.slice(workflowStart).match(/^\s*/)?.[0] ?? '';
-  return before + trailing + workflowCode;
-}
-
-function mergeAgentClassCodeIntoFullCode(
-  fullCode: string,
-  className: string,
-  agentCode: string,
-): string
-{
-  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(
-    `(class ${escaped}\\(Agent\\):[\\s\\S]*?)(?=\\nclass \\w+\\(Agent\\)|\\n[A-Za-z_]\\w*\\s*=|$)`,
-  );
-  const match = fullCode.match(pattern);
-  if (!match)
-  {
-    return fullCode;
-  }
-  return fullCode.replace(pattern, agentCode);
-}
 
 const monacoTheme = (theme: 'dark' | 'light') => (theme === 'light' ? 'vs' : 'vs-dark');
 

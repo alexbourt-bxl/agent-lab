@@ -54,12 +54,18 @@ class WorkflowRunner:
 
         return f"{m}:{s:02d}"
 
-    async def run(self, model: str | None = None) -> None:
+    async def run(
+        self,
+        model: str | None = None,
+        cancel_event: asyncio.Event | None = None,
+    ) -> None:
         import time
 
         from events import emit_agent_event, emit_event
         from tools import get_workflow_run_id, get_workflow_session_id
         from workflow_state import cancel_requested
+
+        stop_event = cancel_event if cancel_event is not None else cancel_requested
 
         def _workflow_prefix() -> str:
             sid = get_workflow_session_id()
@@ -78,7 +84,7 @@ class WorkflowRunner:
         current_agent_name = self._resolve_start_agent_name()
 
         for round_number in range(1, self.max_rounds + 1):
-            if cancel_requested.is_set():
+            if stop_event.is_set():
                 elapsed = time.perf_counter() - workflow_start
 
                 await emit_event(
@@ -98,7 +104,7 @@ class WorkflowRunner:
                     available_agents=self.agent_order,
                 ),
             )
-            cancel_task = asyncio.create_task(cancel_requested.wait())
+            cancel_task = asyncio.create_task(stop_event.wait())
             done, pending = await asyncio.wait(
                 [turn_task, cancel_task],
                 return_when=asyncio.FIRST_COMPLETED,

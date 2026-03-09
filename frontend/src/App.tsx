@@ -2,14 +2,42 @@ import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { ArrowLeft, Play } from 'lucide-react';
 import { formatElapsedSeconds } from './utils/formatElapsed';
+import {
+  createSessionUrl,
+  getWsLogsUrl,
+  runWorkflowUrl,
+  sessionFileUrl,
+  sessionFilesUrl,
+  sessionWorkflowUrl,
+  stopWorkflowUrl,
+} from './api';
 import AppMenu from './components/AppMenu';
 import Button from './components/Button';
-import EditorPanel, {
-  extractAgentClassCode,
-  extractWorkflowCode,
-} from './components/EditorPanel';
+import EditorPanel from './components/EditorPanel';
 import LogList from './components/LogList';
 import SettingsPage from './components/SettingsPage';
+import {
+  clampPercentage,
+  LOG_HEIGHT_COOKIE_NAME,
+  readPercentageCookie,
+  readStoredSessionId,
+  readStoredTheme,
+  writePercentageCookie,
+  writeStoredSessionId,
+  writeStoredTheme,
+} from './persistence';
+import type { Theme } from './persistence';
+import {
+  addAgentSkeletonToCode,
+  agentNameToKebab,
+  buildDefaultCode,
+  DEFAULT_CODE,
+  extractAgentClassCode,
+  extractWorkflowCode,
+  getAgentDisplayNameFromFileContent,
+  parseAgentConfigsFromCode,
+  removeAgentFromCode,
+} from './workflowCode';
 import styles from './App.module.css';
 
 type LogEntry =
@@ -66,362 +94,6 @@ type SessionResultResponse =
   filename: string;
   content: string;
 };
-
-const LOG_HEIGHT_COOKIE_NAME = 'agent_lab_log_height';
-const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
-const CURRENT_SESSION_ID_STORAGE_KEY = 'agent_lab_current_session_id';
-const THEME_STORAGE_KEY = 'agent_lab_theme';
-
-type Theme = 'dark' | 'light';
-
-function readStoredTheme(): Theme
-{
-  if (typeof window === 'undefined')
-  {
-    return 'dark';
-  }
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return stored === 'light' ? 'light' : 'dark';
-}
-
-function writeStoredTheme(theme: Theme): void
-{
-  if (typeof window === 'undefined')
-  {
-    return;
-  }
-  window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-}
-
-function parseAgentConfigsFromCode(code: string): Array<{ name: string; className: string; variable: string }>
-{
-  const configs: Array<{ name: string; className: string; variable: string }> = [];
-  const classMatches = [...code.matchAll(/class (\w+)\(Agent\):\s*/g)];
-  const classesByName = new Map<string, { name: string }>();
-
-  for (let i = 0; i < classMatches.length; i++)
-  {
-    const className = classMatches[i][1];
-    const bodyStart = classMatches[i].index! + classMatches[i][0].length;
-    const bodyEnd = i + 1 < classMatches.length
-      ? classMatches[i + 1].index!
-      : code.length;
-    const nextClass = code.slice(bodyStart).match(/\nclass \w+\(Agent\)/);
-    const end = nextClass
-      ? bodyStart + nextClass.index!
-      : bodyEnd;
-    const body = code.slice(bodyStart, end);
-    const nameMatch = body.match(/name\s*=\s*["']([^"']*)["']/);
-    classesByName.set(className, {
-      name: nameMatch ? nameMatch[1].trim() : className,
-    });
-  }
-
-  for (const [className, attrs] of classesByName)
-  {
-    let variable = '';
-    const pattern = new RegExp(
-      `(\\w+)\\s*=\\s*${className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`,
-      'g',
-    );
-    let m;
-    while ((m = pattern.exec(code)) !== null)
-    {
-      const argsStart = m.index + m[0].length;
-      const argsEnd = findMatchingParen(code, argsStart - 1);
-      const argumentsStr = code.slice(argsStart, argsEnd);
-      const goalMatch = argumentsStr.match(/goal\s*=\s*["']([^"']*)["']/);
-      if (goalMatch)
-      {
-        variable = m[1];
-        break;
-      }
-    }
-    configs.push({
-      name: attrs.name || className,
-      className,
-      variable: variable || className.charAt(0).toLowerCase() + className.slice(1),
-    });
-  }
-
-  configs.sort((a, b) =>
-  {
-    const instA = code.indexOf(`${a.variable} = ${a.className}`);
-    const instB = code.indexOf(`${b.variable} = ${b.className}`);
-    const idxA = instA >= 0 ? instA : code.indexOf(`class ${a.className}(Agent)`);
-    const idxB = instB >= 0 ? instB : code.indexOf(`class ${b.className}(Agent)`);
-    return idxA - idxB;
-  });
-  return configs;
-}
-
-function getAgentDisplayNameFromFileContent(content: string): string
-{
-  const nameMatch = content.match(/name\s*=\s*["']([^"']*)["']/);
-  if (nameMatch && nameMatch[1].trim())
-  {
-    return nameMatch[1].trim();
-  }
-  const classMatch = content.match(/class (\w+)\(Agent\)/);
-  return classMatch ? classMatch[1] : '';
-}
-
-function agentNameToKebab(name: string): string
-{
-  const result: string[] = [];
-  for (let i = 0; i < name.length; i++)
-  {
-    const c = name[i];
-    if (/\s/.test(c))
-    {
-      if (result.length > 0 && result[result.length - 1] !== '-')
-      {
-        result.push('-');
-      }
-    }
-    else if (/[A-Z]/.test(c) && i > 0 && result.length > 0 && result[result.length - 1] !== '-')
-    {
-      result.push('-');
-      result.push(c.toLowerCase());
-    }
-    else if (/[a-zA-Z0-9]/.test(c))
-    {
-      result.push(c.toLowerCase());
-    }
-  }
-  return result.join('').replace(/--/g, '-').replace(/^-+|-+$/g, '') || 'agent';
-}
-
-function findMatchingParen(str: string, openIndex: number): number
-{
-  let depth = 1;
-  for (let i = openIndex + 1; i < str.length; i++)
-  {
-    if (str[i] === '(')
-    {
-      depth++;
-    }
-    else if (str[i] === ')')
-    {
-      depth--;
-      if (depth === 0)
-      {
-        return i;
-      }
-    }
-  }
-  return str.length;
-}
-
-function removeAgentFromCode(code: string, agentName: string): string | null
-{
-  const configs = parseAgentConfigsFromCode(code);
-  const config = configs.find((c) => c.name === agentName);
-  if (!config)
-  {
-    return null;
-  }
-
-  const escapedClass = config.className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escapedVar = config.variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  let result = code;
-
-  const classRegex = new RegExp(
-    `class ${escapedClass}\\(Agent\\):\\s*\\n(?:    .+\\n)*`,
-    'g',
-  );
-  result = result.replace(classRegex, '');
-
-  const instanceRegex = new RegExp(
-    `${escapedVar}\\s*=\\s*${escapedClass}\\s*\\([^)]*\\)\\s*\\n?`,
-    'g',
-  );
-  result = result.replace(instanceRegex, '');
-
-  return result.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-type AgentCodeConfig =
-{
-  className: string;
-  displayName: string;
-  role: string;
-  tools: string;
-  variableName: string;
-  task: string;
-  input: string;
-};
-
-function createAgentCode(config: AgentCodeConfig): { classDef: string; instantiation: string }
-{
-  const classDef = `
-class ${config.className}(Agent):
-    name = "${config.displayName}"
-    role = "${config.role}"
-    tools = ${config.tools}
-`;
-  const instantiation = `${config.variableName} = ${config.className}(\n    task="${config.task}",\n    input=${config.input}\n)`;
-  return { classDef, instantiation };
-}
-
-function addAgentSkeletonToCode(code: string): { code: string; newAgentName: string }
-{
-  const configs = parseAgentConfigsFromCode(code);
-  const newAgentNums = configs
-    .map((c) =>
-    {
-      if (c.name === 'New Agent')
-      {
-        return 1;
-      }
-      const m = c.name.match(/^New Agent (\d+)$/);
-      return m ? Number(m[1]) : 0;
-    })
-    .filter((n) => n > 0);
-  const nextNum = newAgentNums.length > 0 ? Math.max(...newAgentNums) + 1 : 1;
-  const displayName = nextNum === 1 ? 'New Agent' : `New Agent ${nextNum}`;
-  const className = `NewAgent${nextNum}`;
-  const variableName = nextNum === 1 ? 'newAgent' : `newAgent${nextNum}`;
-  const { classDef, instantiation } = createAgentCode(
-  {
-    className,
-    displayName,
-    role: '',
-    tools: '[]',
-    variableName,
-    task: '...',
-    input: '...',
-  });
-
-  if (configs.length === 0)
-  {
-    return {
-      code: code.trimEnd() + classDef + '\n\n' + instantiation + '\n',
-      newAgentName: displayName,
-    };
-  }
-
-  const firstIdx = code.indexOf(`${configs[0].variable} = ${configs[0].className}`);
-  if (firstIdx < 0)
-  {
-    return {
-      code: code.trimEnd() + classDef + '\n\n' + instantiation + '\n',
-      newAgentName: displayName,
-    };
-  }
-
-  const beforeInstantiations = code.slice(0, firstIdx).trimEnd();
-  const instantiations = code.slice(firstIdx).trimStart();
-
-  const withNewClass = beforeInstantiations + classDef + '\n\n' + instantiations;
-  return {
-    code: withNewClass.trimEnd() + '\n\n' + instantiation + '\n',
-    newAgentName: displayName,
-  };
-}
-
-function buildDefaultCode(): string
-{
-  const researcher = createAgentCode(
-  {
-    className: 'Researcher',
-    displayName: 'Researcher',
-    role: 'Market researcher specializing in SaaS and B2B trends.',
-    tools: '[]',
-    variableName: 'researcher',
-    task: "Find and refine a promising SaaS idea based on analyst feedback",
-    input: 'analyst.output',
-  });
-  const analyst = createAgentCode(
-  {
-    className: 'Analyst',
-    displayName: 'Analyst',
-    role: "Critical analyst who identifies flaws and improvement opportunities.",
-    tools: '[]',
-    variableName: 'analyst',
-    task: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
-    input: 'researcher.output',
-  });
-  return (
-    researcher.classDef.trim() +
-    '\n\n' +
-    analyst.classDef.trim() +
-    '\n\n' +
-    researcher.instantiation +
-    '\n\n' +
-    analyst.instantiation +
-    '\n'
-  );
-}
-
-const DEFAULT_CODE = buildDefaultCode();
-
-function clampPercentage(value: number, minimum: number, maximum: number): number
-{
-  return Math.min(maximum, Math.max(minimum, value));
-}
-
-function readPercentageCookie(
-  name: string,
-  fallbackValue: number,
-  minimum: number,
-  maximum: number,
-): number
-{
-  if (typeof document === 'undefined')
-  {
-    return fallbackValue;
-  }
-
-  const cookieEntry = document.cookie
-    .split('; ')
-    .find((entry) => entry.startsWith(`${name}=`));
-
-  if (cookieEntry === undefined)
-  {
-    return fallbackValue;
-  }
-
-  const storedValue = Number(cookieEntry.split('=').slice(1).join('='));
-  if (Number.isNaN(storedValue))
-  {
-    return fallbackValue;
-  }
-
-  return clampPercentage(storedValue, minimum, maximum);
-}
-
-function writePercentageCookie(name: string, value: number): void
-{
-  document.cookie = `${name}=${value}; path=/; max-age=${COOKIE_MAX_AGE_SECONDS}; samesite=lax`;
-}
-
-function readStoredSessionId(): string | null
-{
-  if (typeof window === 'undefined')
-  {
-    return null;
-  }
-
-  return window.localStorage.getItem(CURRENT_SESSION_ID_STORAGE_KEY);
-}
-
-function writeStoredSessionId(sessionId: string | null): void
-{
-  if (typeof window === 'undefined')
-  {
-    return;
-  }
-
-  if (sessionId === null || sessionId === '')
-  {
-    window.localStorage.removeItem(CURRENT_SESSION_ID_STORAGE_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(CURRENT_SESSION_ID_STORAGE_KEY, sessionId);
-}
 
 function getCurrentPathname(): string
 {
@@ -506,7 +178,7 @@ function App()
   const loadResultContent = async (sessionId: string, filename: string): Promise<string> =>
   {
     const response = await axios.get<SessionResultResponse>(
-      `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent(filename)}`,
+      sessionFileUrl(sessionId, filename),
     );
     return response.data.content;
   };
@@ -516,7 +188,7 @@ function App()
     try
     {
       const response = await axios.get<WorkflowSessionSnapshot>(
-        `http://localhost:8000/sessions/${sessionId}/workflow`,
+        sessionWorkflowUrl(sessionId),
       );
       const snapshot = response.data;
       const snapshotAgents = snapshot.agents ?? {};
@@ -634,7 +306,7 @@ function App()
         try
         {
           const filesRes = await axios.get<{ files: string[] }>(
-            `http://localhost:8000/sessions/${snapshot.sessionId}/files`,
+            sessionFilesUrl(snapshot.sessionId),
           );
           const pyFiles = (filesRes.data.files ?? []).filter(
             (f) => f.endsWith('.py') && f !== 'workflow.py',
@@ -760,18 +432,18 @@ function App()
 
       void Promise.all([
         axios.put(
-          `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent('workflow.py')}`,
+          sessionFileUrl(sessionId, 'workflow.py'),
           { content: workflowCode },
         ),
         ...configs.map((cfg) =>
           axios.put(
-            `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent(`${agentNameToKebab(cfg.className)}.py`)}`,
+            sessionFileUrl(sessionId, `${agentNameToKebab(cfg.className)}.py`),
             { content: extractAgentClassCode(currentCode, cfg.className) },
           ),
         ),
         ...toDelete.map((className) =>
           axios.delete(
-            `http://localhost:8000/sessions/${sessionId}/${encodeURIComponent(`${agentNameToKebab(className)}.py`)}`,
+            sessionFileUrl(sessionId, `${agentNameToKebab(className)}.py`),
           ),
         ),
       ])
@@ -801,7 +473,7 @@ function App()
 
       try
       {
-        const createRes = await axios.post<{ sessionId: string }>('http://localhost:8000/sessions/create');
+        const createRes = await axios.post<{ sessionId: string }>(createSessionUrl());
         const newId = createRes.data.sessionId;
         if (typeof newId === 'string' && newId !== '')
         {
@@ -837,7 +509,7 @@ function App()
   {
     try
     {
-      const createRes = await axios.post<{ sessionId: string }>('http://localhost:8000/sessions/create');
+      const createRes = await axios.post<{ sessionId: string }>(createSessionUrl());
       const newId = createRes.data.sessionId;
       if (typeof newId !== 'string' || newId === '')
       {
@@ -887,7 +559,7 @@ function App()
     debugLog('F1', 'run_agent_submit_start',
     {
       frontendOrigin: window.location.origin,
-      backendUrl: 'http://localhost:8000/run',
+      backendUrl: runWorkflowUrl(),
       codeLength: code.length,
       online: navigator.onLine,
     });
@@ -895,7 +567,7 @@ function App()
 
     try
     {
-      const response = await axios.post('http://localhost:8000/run',
+      const response = await axios.post(runWorkflowUrl(),
       {
         code,
         sessionId: currentSessionId,
@@ -935,7 +607,7 @@ function App()
             status: error.response?.status,
             responseData: error.response?.data,
             hasRequest: error.request !== undefined,
-            backendUrl: 'http://localhost:8000/run',
+            backendUrl: runWorkflowUrl(),
           });
           // #endregion
         }
@@ -945,7 +617,7 @@ function App()
           debugLog('F2', 'run_agent_submit_unknown_error',
           {
             error: String(error),
-            backendUrl: 'http://localhost:8000/run',
+            backendUrl: runWorkflowUrl(),
           });
           // #endregion
         }
@@ -972,7 +644,7 @@ function App()
   {
     try
     {
-      await axios.post('http://localhost:8000/stop');
+      await axios.post(stopWorkflowUrl());
     }
     catch
     {
@@ -988,14 +660,14 @@ function App()
 
     const timeoutId = setTimeout(() =>
     {
-      socket = new WebSocket('ws://localhost:8000/ws/logs');
+      socket = new WebSocket(getWsLogsUrl());
 
       socket.onopen = () =>
     {
       // #region agent log
       debugLog('F3', 'logs_socket_open',
       {
-        socketUrl: 'ws://localhost:8000/ws/logs',
+        socketUrl: getWsLogsUrl(),
       });
       // #endregion
     };
@@ -1047,7 +719,7 @@ function App()
       // #region agent log
       debugLog('F3', 'logs_socket_error',
       {
-        socketUrl: 'ws://localhost:8000/ws/logs',
+        socketUrl: getWsLogsUrl(),
       });
       // #endregion
       setLogs((currentLogs) => [
@@ -1217,7 +889,7 @@ function App()
                   if (config && currentSessionId !== null)
                   {
                     void axios.delete(
-                      `http://localhost:8000/sessions/${currentSessionId}/${encodeURIComponent(`${agentNameToKebab(config.className)}.py`)}`,
+                      sessionFileUrl(currentSessionId, `${agentNameToKebab(config.className)}.py`),
                     ).catch(() => {});
                   }
                   const newCode = removeAgentFromCode(code, agentName);

@@ -4,3 +4,7 @@ __pycache__/
 .env
 sessions/
 *.log
+frontend/dist/
+supabase/.temp/
+supabase/.branches/
+.DS_Store

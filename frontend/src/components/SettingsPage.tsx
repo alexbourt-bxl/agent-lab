@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import Button from './Button';
 import axios from 'axios';
+import { sessionSettingsUrl } from '../api';
+import Button from './Button';
 import styles from './SettingsPage.module.css';
 
 type SettingsResponse =
@@ -42,7 +43,7 @@ function SettingsPage({ sessionId }: SettingsPageProps)
       try
       {
         const response = await axios.get<SettingsResponse>(
-          `http://localhost:8000/sessions/${sessionId}/settings`,
+          sessionSettingsUrl(sessionId),
           { timeout: 15000 },
         );
         setProvider(response.data.provider);
@@ -78,7 +79,7 @@ function SettingsPage({ sessionId }: SettingsPageProps)
     try
     {
       const response = await axios.put(
-        `http://localhost:8000/sessions/${sessionId}/settings`,
+        sessionSettingsUrl(sessionId),
         {
           model,
           timeout: Number(timeout),
