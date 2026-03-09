@@ -1,0 +1,12 @@
+# Agent Lab - Supabase local config
+# Run: supabase start
+# API URL: http://127.0.0.1:54321
+# Service key: see output of supabase status
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+
+[db]
+port = 54322

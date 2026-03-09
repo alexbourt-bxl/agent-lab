@@ -107,9 +107,12 @@ type AgentStatus =
 
 type EditorPanelProps =
 {
+  theme?: 'dark' | 'light';
   code: string;
   onCodeChange: (value: string) => void;
   agentOutputs: Record<string, string>;
+  agentOutputsByRound: Record<string, Record<number, string>>;
+  agentRounds: Record<string, number[]>;
   agentStatuses: Record<string, AgentStatus>;
   agentOrder: string[];
   workflowId: string | null;
@@ -259,11 +262,16 @@ function mergeAgentClassCodeIntoFullCode(
   return fullCode.replace(pattern, agentCode);
 }
 
+const monacoTheme = (theme: 'dark' | 'light') => (theme === 'light' ? 'vs' : 'vs-dark');
+
 function EditorPanel(
 {
+  theme = 'dark',
   code,
   onCodeChange,
   agentOutputs,
+  agentOutputsByRound = {},
+  agentRounds = {},
   agentStatuses,
   agentOrder = [],
   workflowId,
@@ -278,6 +286,7 @@ function EditorPanel(
 {
   const splitRef = useRef<HTMLDivElement | null>(null);
   const [codePaneWidthPercent, setCodePaneWidthPercent] = useState(readCodePaneWidth);
+  const [selectedRoundByAgent, setSelectedRoundByAgent] = useState<Record<string, number>>({});
 
   const parsedConfigs = parseAgentConfigsFromCode(code);
   const agentConfigs =
@@ -423,7 +432,7 @@ function EditorPanel(
                   <Editor
                     defaultLanguage="python"
                     language="python"
-                    theme="vs-dark"
+                    theme={monacoTheme(theme)}
                     value={extractWorkflowCode(code)}
                     onChange={(value) => onCodeChange(mergeWorkflowCodeIntoFullCode(code, value ?? ''))}
                     onMount={handleEditorMount}
@@ -458,31 +467,52 @@ function EditorPanel(
             {
               const agentName = activeTab.replace('agent:', '');
               const status = agentStatuses[agentName];
+              const rounds = agentRounds[agentName] ?? [];
+              const outputsForAgent = agentOutputsByRound[agentName] ?? {};
+              const latestRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+              const displayRound = selectedRoundByAgent[agentName] ?? latestRound;
+              const displayOutput =
+                displayRound != null && outputsForAgent[displayRound] !== undefined
+                  ? outputsForAgent[displayRound]
+                  : agentOutputs[agentName] ?? 'No output';
               const isWorking = status?.state === 'thinking' || status?.state === 'working';
               const stepElapsedSeconds =
                 isWorking && status?.stepStartTime !== undefined
                   ? Math.floor((Date.now() - status.stepStartTime) / 1000)
                   : undefined;
               return (
-                <div className={styles.agentHeader}>
-                  {stepElapsedSeconds !== undefined && (
-                    <span className={styles.agentElapsed}>
-                      {formatElapsedSeconds(stepElapsedSeconds)}
+                <>
+                  <div className={styles.agentHeader}>
+                    {stepElapsedSeconds !== undefined && (
+                      <span className={styles.agentElapsed}>
+                        {formatElapsedSeconds(stepElapsedSeconds)}
+                      </span>
+                    )}
+                    <span className={styles.agentStatus}>
+                      {status?.state?.replaceAll('_', ' ') ?? '—'} {status?.message ? `· ${status.message}` : ''}
                     </span>
-                  )}
-                  <span className={styles.agentStatus}>
-                    {status?.state?.replaceAll('_', ' ') ?? '—'} {status?.message ? `· ${status.message}` : ''}
-                  </span>
-                </div>
-              );
-            })()}
+                    {rounds.length > 1 && (
+                      <div className={styles.roundSelector}>
+                        {rounds.map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            className={displayRound === r ? styles.roundBtnActive : styles.roundBtn}
+                            onClick={() => setSelectedRoundByAgent((prev) => ({ ...prev, [agentName]: r }))}
+                          >
+                            R{r}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
             <div className={styles.twoPaneSplit} ref={splitRef}>
               <div className={styles.codePane} style={{ width: `calc(${codePaneWidthPercent}% - 4px)` }}>
                 <div className={styles.editorShell}>
                   <Editor
                     defaultLanguage="python"
                     language="python"
-                    theme="vs-dark"
+                    theme={monacoTheme(theme)}
                     onMount={handleEditorMount}
                     value={
                       (() =>
@@ -521,11 +551,14 @@ function EditorPanel(
               <div className={styles.resultPane} style={{ width: `calc(${100 - codePaneWidthPercent}% - 4px)` }}>
                 <div className={styles.outputContent}>
                   <pre className={styles.outputPre}>
-                    {agentOutputs[activeTab.replace('agent:', '')] ?? 'No output'}
+                    {displayOutput}
                   </pre>
                 </div>
               </div>
             </div>
+                </>
+              );
+            })()}
           </>
         )}
       </div>

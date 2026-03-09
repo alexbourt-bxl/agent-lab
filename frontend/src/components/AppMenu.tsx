@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu } from 'lucide-react';
+import { Menu, Sun, Moon } from 'lucide-react';
 import styles from './AppMenu.module.css';
 
 type AppMenuProps =
 {
+  theme: 'dark' | 'light';
+  onThemeToggle: () => void;
   onNew: () => void;
   onSettings: () => void;
   onClearLogs: () => void;
@@ -11,6 +13,8 @@ type AppMenuProps =
 
 function AppMenu(
 {
+  theme,
+  onThemeToggle,
   onNew,
   onSettings,
   onClearLogs,
@@ -56,6 +60,12 @@ function AppMenu(
     setOpen(false);
   };
 
+  const handleThemeToggle = () =>
+  {
+    onThemeToggle();
+    setOpen(false);
+  };
+
   return (
     <div className={styles.container} ref={containerRef}>
       <button
@@ -71,11 +81,16 @@ function AppMenu(
       {open && (
         <div className={styles.dropdown}>
           <button type="button" className={styles.item} onClick={handleNew}>
-            New
+            New workflow
           </button>
           <div className={styles.separator} role="separator" />
           <button type="button" className={styles.item} onClick={handleSettings}>
             Settings
+          </button>
+          <div className={styles.separator} role="separator" />
+          <button type="button" className={`${styles.item} ${styles.itemWithIcon}`} onClick={handleThemeToggle}>
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
           <div className={styles.separator} role="separator" />
           <button type="button" className={styles.item} onClick={handleClearLogs}>

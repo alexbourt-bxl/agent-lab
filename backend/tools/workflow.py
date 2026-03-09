@@ -1,0 +1,646 @@
+"""Workflow state, session management, and snapshot handling."""
+
+from contextvars import ContextVar
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Callable
+
+from storage import DEFAULT_SETTINGS
+
+from .code_extraction import _extract_workflow_and_agent_code
+
+
+WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+SESSIONS_ROOT = WORKSPACE_ROOT / "sessions"
+
+_workflow_session_id: ContextVar[str | None] = ContextVar(
+    "workflow_session_id",
+    default=None,
+)
+_workflow_run_id: ContextVar[str | None] = ContextVar(
+    "workflow_run_id",
+    default=None,
+)
+_workflow_agent_name: ContextVar[str | None] = ContextVar(
+    "workflow_agent_name",
+    default=None,
+)
+_workflow_round_number: ContextVar[int | None] = ContextVar(
+    "workflow_round_number",
+    default=None,
+)
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _normalize_session_id(session_id: str | None) -> str | None:
+    if session_id is None:
+        return None
+
+    trimmed = session_id.strip()
+    if trimmed == "":
+        return None
+
+    return trimmed[:6]
+
+
+def get_workflow_session_id() -> str | None:
+    return _normalize_session_id(_workflow_session_id.get())
+
+
+def set_workflow_session_id(session_id: str | None) -> None:
+    _workflow_session_id.set(_normalize_session_id(session_id))
+
+
+def _normalize_run_id(run_id: str | None) -> str | None:
+    if run_id is None:
+        return None
+    trimmed = run_id.strip()
+    if trimmed == "":
+        return None
+    return trimmed[:6]
+
+
+def get_workflow_run_id() -> str | None:
+    return _normalize_run_id(_workflow_run_id.get())
+
+
+def set_workflow_run_id(run_id: str | None) -> None:
+    _workflow_run_id.set(_normalize_run_id(run_id))
+
+
+def set_workflow_context(agent_name: str | None, round_number: int | None) -> None:
+    _workflow_agent_name.set(agent_name)
+    _workflow_round_number.set(round_number)
+
+
+def _normalize_output_path(target_path: Path) -> Path:
+    if target_path.suffix == "":
+        target_path = target_path.with_suffix(".md")
+    elif target_path.suffix == ".txt":
+        target_path = target_path.with_suffix(".md")
+
+    return target_path
+
+
+def _sanitize_agent_name(agent_name: str) -> str:
+    sanitized = "".join(c if c.isalnum() or c in "-_" else "_" for c in agent_name)
+    return sanitized or "agent"
+
+
+def get_session_directory(session_id: str | None = None) -> Path:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return SESSIONS_ROOT
+
+    return SESSIONS_ROOT / resolved_session_id
+
+
+WORKFLOW_STATE_FILENAME = "workflow.json"
+WORKFLOW_CODE_FILENAME = "workflow.py"
+
+
+def _agent_name_to_kebab(name: str) -> str:
+    result: list[str] = []
+    for i, c in enumerate(name):
+        if c.isspace():
+            if result and result[-1] != "-":
+                result.append("-")
+        elif c.isupper() and i > 0 and result and result[-1] != "-":
+            result.append("-")
+            result.append(c.lower())
+        elif c.isalnum():
+            result.append(c.lower())
+    return "".join(result).replace("--", "-").strip("-") or "agent"
+
+
+def class_name_to_output_pattern(class_name: str) -> str:
+    """Derive output file pattern from class name (e.g. Researcher -> researcher_{round}.md)."""
+    return f"{_agent_name_to_kebab(class_name)}_{{round}}.md"
+
+
+def kebab_to_class_name(kebab: str) -> str:
+    """Convert kebab filename stem to class name (e.g. researcher -> Researcher)."""
+    if not kebab:
+        return "Agent"
+    return "".join(part.capitalize() for part in kebab.split("-"))
+
+
+def get_workflow_state_path(session_id: str | None = None) -> Path:
+    return get_session_directory(session_id) / WORKFLOW_STATE_FILENAME
+
+
+def get_workflow_code_path(session_id: str | None = None) -> Path:
+    return get_session_directory(session_id) / WORKFLOW_CODE_FILENAME
+
+
+def get_agent_code_path(agent_name: str, session_id: str | None = None) -> Path:
+    kebab = _agent_name_to_kebab(agent_name)
+    return get_session_directory(session_id) / f"{kebab}.py"
+
+
+def get_agent_code_path_by_class_name(class_name: str, session_id: str | None = None) -> Path:
+    """Agent files are named by class name (e.g. NewAgent1 -> new-agent-1.py)."""
+    kebab = _agent_name_to_kebab(class_name)
+    return get_session_directory(session_id) / f"{kebab}.py"
+
+
+def get_workflow_file_path(session_id: str | None = None) -> Path:
+    return get_workflow_state_path(session_id)
+
+
+def _default_agent_snapshot(agent_name: str, output_file: str = "{round}.md") -> dict[str, Any]:
+    now = _utc_now()
+    return {
+        "name": agent_name,
+        "state": "waiting_for_turn",
+        "message": "",
+        "round": 0,
+        "lastResultFile": None,
+        "resultFiles": [],
+        "outputFile": output_file,
+        "stepStartedAt": None,
+        "updatedAt": now,
+    }
+
+
+def _default_settings() -> dict[str, Any]:
+    return dict(DEFAULT_SETTINGS)
+
+
+def _default_workflow_snapshot(
+    session_id: str,
+    agent_order: list[str] | None = None,
+    run_id: str | None = None,
+    status: str = "running",
+) -> dict[str, Any]:
+    now = _utc_now()
+    ordered_agents = agent_order or []
+    return {
+        "sessionId": session_id,
+        "runId": _normalize_run_id(run_id),
+        "status": status,
+        "settings": _default_settings(),
+        "agentOrder": ordered_agents,
+        "currentAgent": None,
+        "currentRound": 0,
+        "startedAt": now,
+        "updatedAt": now,
+        "workflowResult": None,
+        "workflowResultFile": None,
+        "agents": {
+            agent_name: _default_agent_snapshot(agent_name)
+            for agent_name in ordered_agents
+        },
+    }
+
+
+def _write_workflow_snapshot(snapshot: dict[str, Any], session_id: str | None = None) -> None:
+    import db as _db
+
+    resolved_session_id = _normalize_session_id(session_id) or str(snapshot.get("sessionId", "")).strip()[:6]
+    if resolved_session_id == "":
+        return
+
+    snapshot["sessionId"] = resolved_session_id
+    snapshot["updatedAt"] = _utc_now()
+    _db.write_workflow_snapshot(resolved_session_id, snapshot)
+
+
+def read_workflow_snapshot(session_id: str | None = None) -> dict[str, Any] | None:
+    import db as _db
+
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return None
+
+    snapshot = _db.read_workflow_snapshot(resolved_session_id)
+    if snapshot is None:
+        return None
+
+    snapshot["sessionId"] = resolved_session_id
+    if "agentOrder" not in snapshot or not isinstance(snapshot["agentOrder"], list):
+        snapshot["agentOrder"] = []
+    if "agents" not in snapshot or not isinstance(snapshot["agents"], dict):
+        snapshot["agents"] = {}
+    for agent_name, agent_data in list(snapshot["agents"].items()):
+        if isinstance(agent_data, dict) and "outputFile" not in agent_data:
+            agent_data["outputFile"] = "{round}.md"
+    if "status" not in snapshot or not isinstance(snapshot["status"], str):
+        snapshot["status"] = "running"
+    if "runId" not in snapshot:
+        snapshot["runId"] = None
+    if "settings" not in snapshot or not isinstance(snapshot["settings"], dict):
+        snapshot["settings"] = _default_settings()
+    else:
+        merged = dict(_default_settings())
+        merged.update(snapshot["settings"])
+        snapshot["settings"] = merged
+    if "workflowResult" not in snapshot:
+        snapshot["workflowResult"] = None
+    if "workflowResultFile" not in snapshot:
+        snapshot["workflowResultFile"] = None
+    if "currentAgent" not in snapshot:
+        snapshot["currentAgent"] = None
+    if "currentRound" not in snapshot:
+        snapshot["currentRound"] = 0
+    if "startedAt" not in snapshot:
+        snapshot["startedAt"] = None
+    if "updatedAt" not in snapshot:
+        snapshot["updatedAt"] = None
+
+    for agent_name in snapshot["agentOrder"]:
+        agents = snapshot["agents"]
+        if agent_name not in agents or not isinstance(agents[agent_name], dict):
+            agents[agent_name] = _default_agent_snapshot(agent_name)
+
+    return snapshot
+
+
+def get_session_settings(session_id: str | None = None) -> dict[str, Any]:
+    snapshot = read_workflow_snapshot(session_id)
+    if snapshot is None:
+        return _default_settings()
+    settings = snapshot.get("settings")
+    if not isinstance(settings, dict):
+        return _default_settings()
+    merged = dict(_default_settings())
+    merged.update(settings)
+    return merged
+
+
+def update_session_settings(
+    settings: dict[str, Any],
+    session_id: str | None = None,
+) -> None:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return
+
+    def apply(snapshot: dict[str, Any]) -> None:
+        current = snapshot.get("settings")
+        if not isinstance(current, dict):
+            current = _default_settings()
+        merged = dict(current)
+        merged.update(settings)
+        snapshot["settings"] = merged
+
+    update_workflow_snapshot(apply, resolved_session_id)
+
+
+DEFAULT_SESSION_CODE = '''class Researcher(Agent):
+    name = "Researcher"
+    role = "Market researcher specializing in SaaS and B2B trends."
+
+class Analyst(Agent):
+    name = "Analyst"
+    role = "Critical analyst who identifies flaws and improvement opportunities."
+
+researcher = Researcher(
+    goal="Find and refine a promising SaaS idea based on analyst feedback",
+    input=analyst.output
+)
+
+analyst = Analyst(
+    task="Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+    input=researcher.output
+)
+'''
+
+
+def create_session() -> str:
+    import uuid
+
+    import db as _db
+
+    session_id = uuid.uuid4().hex[:6]
+    snapshot = _default_workflow_snapshot(
+        session_id,
+        agent_order=["Researcher", "Analyst"],
+        run_id=None,
+        status="idle",
+    )
+    workflow_code, agent_code = _extract_workflow_and_agent_code(DEFAULT_SESSION_CODE)
+    _db.create_session(session_id, snapshot, workflow_code, agent_code)
+    initialize_workflow_session(
+        session_id,
+        agent_order=["Researcher", "Analyst"],
+        run_id=None,
+        agent_output_files={
+            "Researcher": class_name_to_output_pattern("Researcher"),
+            "Analyst": class_name_to_output_pattern("Analyst"),
+        },
+    )
+    return session_id
+
+
+def _pattern_to_regex(pattern: str) -> str:
+    """Convert output pattern like 'result_{round}.md' to regex to extract round."""
+    import re
+    escaped = re.escape(pattern).replace(r"\{round\}", r"(\d+)")
+    return escaped
+
+
+def _rename_agent_result_files(
+    session_dir: Path,
+    old_pattern: str,
+    new_pattern: str,
+    result_files: list[str],
+    last_result_file: str | None,
+) -> tuple[list[str], str | None]:
+    """Rename result files when output pattern changes. Returns new result_files and lastResultFile."""
+    import re
+    regex = _pattern_to_regex(old_pattern)
+    new_result_files: list[str] = []
+    new_last: str | None = None
+    for old_name in result_files:
+        match = re.fullmatch(regex, old_name)
+        if match:
+            round_str = match.group(1)
+            new_name = new_pattern.replace("{round}", round_str)
+            old_path = session_dir / old_name
+            new_path = session_dir / new_name
+            if old_path.exists() and old_path != new_path:
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                old_path.rename(new_path)
+            new_result_files.append(new_name)
+            if old_name == last_result_file:
+                new_last = new_name
+        else:
+            new_result_files.append(old_name)
+            if old_name == last_result_file:
+                new_last = last_result_file
+    if new_last is None and last_result_file:
+        match = re.fullmatch(regex, last_result_file)
+        if match:
+            round_str = match.group(1)
+            new_last = new_pattern.replace("{round}", round_str)
+        else:
+            new_last = last_result_file
+    return new_result_files, new_last
+
+
+def initialize_workflow_session(
+    session_id: str,
+    agent_order: list[str],
+    run_id: str | None = None,
+    agent_output_files: dict[str, str] | None = None,
+) -> None:
+    resolved_session_id = _normalize_session_id(session_id)
+    if resolved_session_id is None:
+        return
+
+    output_files = agent_output_files or {}
+
+    existing = read_workflow_snapshot(resolved_session_id)
+    if existing is not None and run_id is not None:
+        snapshot = _default_workflow_snapshot(
+            resolved_session_id,
+            agent_order,
+            run_id=run_id,
+            status="running",
+        )
+        snapshot["settings"] = existing.get("settings")
+        if not isinstance(snapshot["settings"], dict):
+            snapshot["settings"] = _default_settings()
+    else:
+        snapshot = _default_workflow_snapshot(
+            resolved_session_id,
+            agent_order,
+            run_id=run_id,
+            status="running" if run_id else "idle",
+        )
+        if existing is not None:
+            existing_settings = existing.get("settings")
+            if isinstance(existing_settings, dict):
+                snapshot["settings"] = existing_settings
+
+    session_dir = get_session_directory(resolved_session_id)
+    old_agent_order = existing.get("agentOrder", []) if existing else []
+    for i, agent_name in enumerate(agent_order):
+        output_file = output_files.get(
+            agent_name,
+            class_name_to_output_pattern(agent_name),
+        )
+        _ensure_agent_snapshot(snapshot, agent_name)
+        snapshot["agents"][agent_name]["outputFile"] = output_file
+
+        if existing is not None and session_dir.exists():
+            old_agent_name = old_agent_order[i] if i < len(old_agent_order) else None
+            old_agent = existing.get("agents", {}).get(old_agent_name or agent_name)
+            old_pattern = old_agent.get("outputFile", "{round}.md") if isinstance(old_agent, dict) else "{round}.md"
+            if old_pattern != output_file and old_agent is not None:
+                old_result_files = old_agent.get("resultFiles", [])
+                old_last = old_agent.get("lastResultFile")
+                new_result_files, new_last = _rename_agent_result_files(
+                    session_dir,
+                    old_pattern,
+                    output_file,
+                    old_result_files,
+                    old_last,
+                )
+                snapshot["agents"][agent_name]["resultFiles"] = new_result_files
+                snapshot["agents"][agent_name]["lastResultFile"] = new_last
+
+    _write_workflow_snapshot(snapshot, resolved_session_id)
+
+
+def _ensure_agent_snapshot(snapshot: dict[str, Any], agent_name: str) -> dict[str, Any]:
+    agents = snapshot.setdefault("agents", {})
+    if not isinstance(agents, dict):
+        agents = {}
+        snapshot["agents"] = agents
+
+    if agent_name not in agents or not isinstance(agents[agent_name], dict):
+        agents[agent_name] = _default_agent_snapshot(agent_name)
+
+    agent_snapshot = agents[agent_name]
+    if agent_name not in snapshot.get("agentOrder", []):
+        snapshot.setdefault("agentOrder", []).append(agent_name)
+
+    agent_snapshot["name"] = agent_name
+    agent_snapshot.setdefault("resultFiles", [])
+    agent_snapshot.setdefault("lastResultFile", None)
+    agent_snapshot.setdefault("stepStartedAt", None)
+    agent_snapshot.setdefault("updatedAt", _utc_now())
+    agent_snapshot.setdefault("round", 0)
+    agent_snapshot.setdefault("message", "")
+    agent_snapshot.setdefault("state", "waiting_for_turn")
+    return agent_snapshot
+
+
+def update_workflow_snapshot(
+    updater: Callable[[dict[str, Any]], None],
+    session_id: str | None = None,
+) -> None:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return
+
+    snapshot = read_workflow_snapshot(resolved_session_id)
+    if snapshot is None:
+        snapshot = _default_workflow_snapshot(resolved_session_id)
+
+    updater(snapshot)
+    _write_workflow_snapshot(snapshot, resolved_session_id)
+
+
+def sync_workflow_event(
+    event_type: str,
+    message: str,
+    state: str | None = None,
+    agent_name: str | None = None,
+    round_number: int | None = None,
+    agent_order: list[str] | None = None,
+    session_id: str | None = None,
+) -> None:
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return
+
+    def apply(snapshot: dict[str, Any]) -> None:
+        now = _utc_now()
+
+        if agent_order is not None:
+            snapshot["agentOrder"] = agent_order
+            for ordered_agent_name in agent_order:
+                _ensure_agent_snapshot(snapshot, ordered_agent_name)
+
+        if event_type == "workflow_started":
+            snapshot["status"] = "running"
+            if snapshot.get("startedAt") is None:
+                snapshot["startedAt"] = now
+
+        if event_type in {"workflow_result", "system"} and state in {"done", "stopped", "error", "running"}:
+            snapshot["status"] = state
+
+        if round_number is not None:
+            snapshot["currentRound"] = round_number
+
+        if agent_name is not None:
+            agent_snapshot = _ensure_agent_snapshot(snapshot, agent_name)
+            previous_state = str(agent_snapshot.get("state", ""))
+
+            if state is not None:
+                agent_snapshot["state"] = state
+            agent_snapshot["message"] = message
+            if round_number is not None:
+                agent_snapshot["round"] = round_number
+            if state in {"working", "executing"}:
+                if previous_state != state or agent_snapshot.get("stepStartedAt") is None:
+                    agent_snapshot["stepStartedAt"] = now
+            elif state is not None:
+                agent_snapshot["stepStartedAt"] = None
+
+            agent_snapshot["updatedAt"] = now
+            snapshot["currentAgent"] = agent_name
+
+        if event_type == "workflow_result":
+            snapshot["workflowResult"] = message
+            current_agent_name = snapshot.get("currentAgent")
+            if isinstance(current_agent_name, str) and current_agent_name != "":
+                current_agent_snapshot = _ensure_agent_snapshot(snapshot, current_agent_name)
+                workflow_result_file = current_agent_snapshot.get("lastResultFile")
+                if isinstance(workflow_result_file, str) and workflow_result_file != "":
+                    snapshot["workflowResultFile"] = workflow_result_file
+
+    update_workflow_snapshot(apply, resolved_session_id)
+
+
+def record_agent_output(
+    agent_name: str,
+    session_id: str | None = None,
+) -> None:
+    def apply(snapshot: dict[str, Any]) -> None:
+        agent_snapshot = _ensure_agent_snapshot(snapshot, agent_name)
+        agent_snapshot["updatedAt"] = _utc_now()
+        snapshot["currentAgent"] = agent_name
+
+    update_workflow_snapshot(apply, session_id)
+
+
+def _parse_result_filename(filename: str) -> tuple[str | None, int | None]:
+    """Parse analyst_6.md -> (Analyst, 6). Returns (agent_name, round) or (None, None)."""
+    import re
+
+    stem = Path(filename).stem
+    m = re.match(r"^(.+)_(\d+)$", stem)
+    if not m:
+        return None, None
+    kebab, round_str = m.group(1), m.group(2)
+    agent_name = kebab_to_class_name(kebab)
+    try:
+        return agent_name, int(round_str)
+    except ValueError:
+        return None, None
+
+
+def record_result_file(
+    filename: str,
+    content: str,
+    session_id: str | None = None,
+    agent_name: str | None = None,
+    round_number: int | None = None,
+) -> None:
+    import db as _db
+
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return
+
+    resolved_agent_name = agent_name or _workflow_agent_name.get()
+    resolved_round_number = round_number if round_number is not None else _workflow_round_number.get()
+    if resolved_agent_name is None:
+        return
+
+    parsed_agent, parsed_round = _parse_result_filename(filename)
+    if parsed_agent:
+        resolved_agent_name = parsed_agent
+    if parsed_round is not None:
+        resolved_round_number = parsed_round
+    if resolved_round_number is None:
+        resolved_round_number = 0
+
+    _db.insert_agent_output(resolved_session_id, resolved_agent_name, resolved_round_number, content)
+
+    def apply(snapshot: dict[str, Any]) -> None:
+        agent_snapshot = _ensure_agent_snapshot(snapshot, resolved_agent_name)
+        agent_snapshot["lastResultFile"] = filename
+        result_files = agent_snapshot.setdefault("resultFiles", [])
+        if filename not in result_files:
+            result_files.append(filename)
+        agent_snapshot["round"] = resolved_round_number
+        snapshot["currentRound"] = resolved_round_number
+        agent_snapshot["updatedAt"] = _utc_now()
+        snapshot["currentAgent"] = resolved_agent_name
+
+    update_workflow_snapshot(apply, resolved_session_id)
+
+
+def write_session_code(code: str, session_id: str | None = None) -> None:
+    import db as _db
+
+    from .code_extraction import _get_agent_name_from_class
+
+    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
+    if resolved_session_id is None:
+        return
+
+    workflow_code, agent_code = _extract_workflow_and_agent_code(code)
+    agent_code_by_name: dict[str, str] = {}
+    for class_name, class_body in agent_code.items():
+        agent_name = _get_agent_name_from_class(class_body) or class_name
+        agent_code_by_name[agent_name] = class_body
+    _db.write_session_code(resolved_session_id, workflow_code, agent_code_by_name)
+
+
+def read_session_code(session_id: str) -> str:
+    import db as _db
+
+    resolved_session_id = _normalize_session_id(session_id)
+    if resolved_session_id is None:
+        raise FileNotFoundError("Session not found.")
+
+    return _db.read_session_code(resolved_session_id)

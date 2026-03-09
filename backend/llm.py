@@ -148,7 +148,7 @@ def get_ollama_tags_url(base_url: str | None = None) -> str:
 async def list_available_ollama_models(base_url: str | None = None) -> list[str]:
     tags_url = get_ollama_tags_url(base_url)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=5.0) as client:
         response = await client.get(tags_url)
         response.raise_for_status()
 

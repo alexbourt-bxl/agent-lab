@@ -15,7 +15,7 @@
 .button:focus,
 .button:focus-visible
 {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
@@ -56,55 +56,55 @@
 
 .buttonPrimary
 {
-  border: 1px solid #3b4252;
-  background-color: #1f2937;
-  color: #f9fafb;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface-elevated);
+  color: var(--color-text-strong);
 }
 
 .buttonPrimary:hover:not(:disabled)
 {
-  border-color: #6b7280;
-  background-color: #273244;
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-surface-hover-strong);
 }
 
 .buttonSecondary
 {
-  border: 1px solid #3b4252;
-  background-color: #11151d;
-  color: #cbd5e1;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface-subtle);
+  color: var(--color-text-muted-strong);
 }
 
 .buttonSecondary:hover:not(:disabled)
 {
-  border-color: #6b7280;
-  background-color: #18202c;
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-surface-hover);
 }
 
 .buttonRun
 {
   min-width: 120px;
-  border: 1px solid #3b4252;
-  background-color: #1f2937;
-  color: #f9fafb;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface-elevated);
+  color: var(--color-text-strong);
 }
 
 .buttonRun:hover:not(:disabled)
 {
-  border-color: #6b7280;
-  background-color: #273244;
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-surface-hover-strong);
 }
 
 .buttonClearLogs
 {
   padding: 0.45rem 0.8rem;
   font-size: 0.8rem;
-  border: 1px solid #3b4252;
-  background-color: #11151d;
-  color: #cbd5e1;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-surface-subtle);
+  color: var(--color-text-muted-strong);
 }
 
 .buttonClearLogs:hover:not(:disabled)
 {
-  border-color: #6b7280;
-  background-color: #18202c;
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-surface-hover);
 }

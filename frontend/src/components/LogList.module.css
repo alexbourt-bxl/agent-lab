@@ -12,25 +12,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   text-align: center;
 }
 
 .logList
 {
   display: grid;
-  grid-template-columns: 140px max-content 1fr;
+  grid-template-columns: 140px max-content minmax(0, 1fr);
   gap: 0 12px;
   row-gap: 4px;
   font-family: 'Cascadia Code', 'Consolas', monospace;
   font-size: 0.9rem;
-}
-
-@media (max-width: 900px)
-{
-  .logList
-  {
-    grid-template-columns: 1fr;
-  }
+  min-width: 0;
 }
 

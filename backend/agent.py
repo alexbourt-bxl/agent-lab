@@ -75,7 +75,7 @@ class Agent:
         max_rounds: int = 5,
         available_agents: list[str] | None = None,
     ) -> dict[str, Any]:
-        from main import emit_agent_event
+        from events import emit_agent_event
         from runtime import _debug_log
 
         self._ingest_handoffs()
@@ -331,7 +331,7 @@ class Agent:
         structured_output: dict[str, Any] | None,
         round_number: int,
     ) -> str | None:
-        from main import emit_agent_event
+        from events import emit_agent_event
 
         tool_call = self._extract_tool_call(structured_output)
         if tool_call is None:

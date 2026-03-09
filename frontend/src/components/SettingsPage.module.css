@@ -4,9 +4,9 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border: 1px solid #2a2f3a;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background-color: #151922;
+  background-color: var(--color-bg-surface);
   overflow: hidden;
 }
 
@@ -17,14 +17,14 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 16px;
-  border-bottom: 1px solid #2a2f3a;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .settingsHeader
 {
   font-size: 0.95rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--color-text-muted-strong);
 }
 
 .settingsBody
@@ -48,16 +48,16 @@
 {
   font-size: 0.9rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--color-text-muted-strong);
 }
 
 .settingsInput
 {
-  border: 1px solid #3b4252;
+  border: 1px solid var(--color-border-subtle);
   border-radius: 10px;
   padding: 0.75rem 0.9rem;
-  background-color: #11151d;
-  color: #f9fafb;
+  background-color: var(--color-bg-surface-subtle);
+  color: var(--color-text-strong);
   font: inherit;
 }
 
@@ -69,12 +69,12 @@
 
 .errorMessage
 {
-  color: #f87171;
+  color: var(--color-accent-red);
 }
 
 .successMessage
 {
-  color: #4ade80;
+  color: var(--color-accent-green);
 }
 
 @media (max-width: 900px)

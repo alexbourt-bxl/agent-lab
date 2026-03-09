@@ -43,6 +43,7 @@ function SettingsPage({ sessionId }: SettingsPageProps)
       {
         const response = await axios.get<SettingsResponse>(
           `http://localhost:8000/sessions/${sessionId}/settings`,
+          { timeout: 15000 },
         );
         setProvider(response.data.provider);
         setModel(response.data.model);

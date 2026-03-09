@@ -42,6 +42,7 @@ type SessionAgentSnapshot =
   round?: number;
   lastResultFile?: string | null;
   resultFiles?: string[];
+  rounds?: number[];
   stepStartedAt?: string | null;
 };
 
@@ -69,6 +70,28 @@ type SessionResultResponse =
 const LOG_HEIGHT_COOKIE_NAME = 'agent_lab_log_height';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const CURRENT_SESSION_ID_STORAGE_KEY = 'agent_lab_current_session_id';
+const THEME_STORAGE_KEY = 'agent_lab_theme';
+
+type Theme = 'dark' | 'light';
+
+function readStoredTheme(): Theme
+{
+  if (typeof window === 'undefined')
+  {
+    return 'dark';
+  }
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  return stored === 'light' ? 'light' : 'dark';
+}
+
+function writeStoredTheme(theme: Theme): void
+{
+  if (typeof window === 'undefined')
+  {
+    return;
+  }
+  window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+}
 
 function parseAgentConfigsFromCode(code: string): Array<{ name: string; className: string; variable: string }>
 {
@@ -265,7 +288,7 @@ function addAgentSkeletonToCode(code: string): { code: string; newAgentName: str
     className,
     displayName,
     role: '',
-    tools: '[ReadFile, WriteFile]',
+    tools: '[]',
     variableName,
     task: '...',
     input: '...',
@@ -305,7 +328,7 @@ function buildDefaultCode(): string
     className: 'Researcher',
     displayName: 'Researcher',
     role: 'Market researcher specializing in SaaS and B2B trends.',
-    tools: '[ReadFile, WriteFile]',
+    tools: '[]',
     variableName: 'researcher',
     task: "Find and refine a promising SaaS idea based on analyst feedback",
     input: 'analyst.output',
@@ -315,7 +338,7 @@ function buildDefaultCode(): string
     className: 'Analyst',
     displayName: 'Analyst',
     role: "Critical analyst who identifies flaws and improvement opportunities.",
-    tools: '[ReadFile, WriteFile]',
+    tools: '[]',
     variableName: 'analyst',
     task: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
     input: 'researcher.output',
@@ -439,11 +462,14 @@ function App()
 {
   const contentAreaRef = useRef<HTMLDivElement | null>(null);
   const [pathname, setPathname] = useState(getCurrentPathname);
+  const [theme, setTheme] = useState<Theme>(readStoredTheme);
   const [code, setCode] = useState(DEFAULT_CODE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [agentOutputs, setAgentOutputs] = useState<Record<string, string>>({});
+  const [agentOutputsByRound, setAgentOutputsByRound] = useState<Record<string, Record<number, string>>>({});
+  const [agentRounds, setAgentRounds] = useState<Record<string, number[]>>({});
   const [workflowResult, setWorkflowResult] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(readStoredSessionId);
   const [editorActiveTab, setEditorActiveTab] = useState('workflow');
@@ -471,6 +497,8 @@ function App()
     setAgentStatuses({});
     setAgentOrder([]);
     setAgentOutputs({});
+    setAgentOutputsByRound({});
+    setAgentRounds({});
     setWorkflowResult(null);
     workflowStartTimeRef.current = null;
   };
@@ -520,29 +548,54 @@ function App()
         }),
       );
 
-      const nextAgentOutputs = Object.fromEntries(
-        await Promise.all(
-          agentNames.map(async (agentName) =>
-          {
-            const agentSnapshot = snapshotAgents[agentName];
-            let output = '';
-
-            if (typeof agentSnapshot?.lastResultFile === 'string' && agentSnapshot.lastResultFile !== '')
+      const roundsByAgent: Record<string, number[]> = {};
+      for (const agentName of agentNames)
+      {
+        const agentSnapshot = snapshotAgents[agentName];
+        const rounds = agentSnapshot?.rounds ?? [];
+        const resultFiles = agentSnapshot?.resultFiles ?? [];
+        if (rounds.length > 0)
+        {
+          roundsByAgent[agentName] = [...rounds].sort((a, b) => a - b);
+        }
+        else if (resultFiles.length > 0)
+        {
+          const parsed = resultFiles
+            .map((f) =>
             {
-              try
-              {
-                output = await loadResultContent(snapshot.sessionId, agentSnapshot.lastResultFile);
-              }
-              catch
-              {
-                output = '';
-              }
-            }
+              const m = f.match(/^[^.]+_(\d+)\.md$/);
+              return m ? parseInt(m[1], 10) : null;
+            })
+            .filter((r): r is number => r !== null);
+          roundsByAgent[agentName] = [...new Set(parsed)].sort((a, b) => a - b);
+        }
+      }
 
-            return [agentName, output] as const;
-          }),
-        ),
-      );
+      const outputsByRound: Record<string, Record<number, string>> = {};
+      const lastOutputs: Record<string, string> = {};
+      for (const agentName of agentNames)
+      {
+        const rounds = roundsByAgent[agentName] ?? [];
+        outputsByRound[agentName] = {};
+        let lastOutput = '';
+        for (const r of rounds)
+        {
+          const filename = `${agentNameToKebab(agentName)}_${r}.md`;
+          try
+          {
+            const content = await loadResultContent(snapshot.sessionId, filename);
+            outputsByRound[agentName][r] = content;
+            lastOutput = content;
+          }
+          catch
+          {
+            outputsByRound[agentName][r] = '';
+          }
+        }
+        lastOutputs[agentName] = lastOutput;
+      }
+
+      const nextAgentOutputs = lastOutputs;
 
       let nextWorkflowResult = snapshot.workflowResult ?? null;
       if (typeof snapshot.workflowResultFile === 'string' && snapshot.workflowResultFile !== '')
@@ -560,6 +613,8 @@ function App()
       setAgentOrder(agentNames);
       setAgentStatuses(nextAgentStatuses);
       setAgentOutputs(nextAgentOutputs);
+      setAgentOutputsByRound(outputsByRound);
+      setAgentRounds(roundsByAgent);
       setWorkflowResult(nextWorkflowResult);
 
       const parsedStartedAt =
@@ -647,6 +702,12 @@ function App()
   {
     currentSessionIdRef.current = currentSessionId;
   }, [currentSessionId]);
+
+  useEffect(() =>
+  {
+    document.documentElement.setAttribute('data-theme', theme);
+    writeStoredTheme(theme);
+  }, [theme]);
 
   useEffect(() =>
   {
@@ -819,7 +880,6 @@ function App()
     setLogs([]);
     clearSessionSnapshot();
     setIsRunning(true);
-    workflowStartTimeRef.current = Date.now();
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
@@ -952,6 +1012,8 @@ function App()
           if (logEntry.eventType === 'workflow_started')
           {
             persistCurrentSessionId(logEntry.sessionId);
+            workflowStartTimeRef.current = Date.now();
+            void loadSession(logEntry.sessionId);
           }
 
           if (
@@ -1018,11 +1080,10 @@ function App()
   const hasActiveStep = Object.values(agentStatuses).some(
     (s) => s.state === 'working' || s.state === 'executing',
   );
-  const isWorkflowActive = isRunning || hasActiveStep;
 
   useEffect(() =>
   {
-    if (!isWorkflowActive)
+    if (!hasActiveStep)
     {
       return;
     }
@@ -1030,7 +1091,7 @@ function App()
     const id = setInterval(() => setTick((t) => t + 1), 1000);
 
     return () => clearInterval(id);
-  }, [isWorkflowActive]);
+  }, [hasActiveStep]);
 
   const workflowElapsedSeconds =
     workflowStartTimeRef.current !== null
@@ -1099,6 +1160,8 @@ function App()
       <header className={styles.topBar}>
         <div className={styles.topBarLeft}>
           <AppMenu
+            theme={theme}
+            onThemeToggle={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
             onNew={handleNewSession}
             onSettings={() => navigateTo('/settings')}
             onClearLogs={() => setLogs([])}
@@ -1113,12 +1176,12 @@ function App()
           ) : (
             <Button
               variant="run"
-              onClick={isWorkflowActive ? handleStopWorkflow : handleRunAgent}
-              icon={!isWorkflowActive ? <Play size={16} /> : undefined}
-              showSpinner={isWorkflowActive}
-              elapsedTime={isWorkflowActive ? formatElapsedSeconds(workflowElapsedSeconds) : undefined}
+              onClick={isRunning ? handleStopWorkflow : handleRunAgent}
+              icon={!isRunning ? <Play size={16} /> : undefined}
+              showSpinner={hasActiveStep}
+              elapsedTime={hasActiveStep ? formatElapsedSeconds(workflowElapsedSeconds) : undefined}
             >
-              {isWorkflowActive ? 'Stop Workflow' : 'Run Workflow'}
+              {isRunning ? 'Stop Workflow' : 'Run Workflow'}
             </Button>
           )}
         </div>
@@ -1133,9 +1196,12 @@ function App()
           <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
             <section className={styles.panel} style={{ flex: 1 }}>
               <EditorPanel
+                theme={theme}
                 code={code}
                 onCodeChange={setCode}
                 agentOutputs={agentOutputs}
+                agentOutputsByRound={agentOutputsByRound}
+                agentRounds={agentRounds}
                 agentStatuses={agentStatuses}
                 agentOrder={agentOrder}
                 workflowId={currentSessionId}

@@ -7,6 +7,12 @@
     <title>Agent Lab</title>
   </head>
   <body>
+    <script>
+      (function() {
+        var t = localStorage.getItem('agent_lab_theme');
+        if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

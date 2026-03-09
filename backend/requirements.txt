@@ -3,3 +3,5 @@ uvicorn
 pydantic
 websockets
 httpx
+supabase
+python-dotenv

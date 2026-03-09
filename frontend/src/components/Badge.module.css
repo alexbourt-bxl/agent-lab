@@ -4,7 +4,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  border: 1px solid #3b4252;
+  border: 1px solid var(--color-border-subtle);
   border-radius: 999px;
   padding: 0.2rem 0.65rem;
   font-size: 0.8rem;
@@ -38,32 +38,32 @@
 
 .badgeThinking
 {
-  color: #60a5fa;
-  border-color: #2563eb;
+  color: var(--color-accent-blue);
+  border-color: var(--color-accent-blue);
 }
 
 .badgeWorking
 {
-  color: #facc15;
-  border-color: #eab308;
+  color: var(--color-accent-yellow);
+  border-color: var(--color-accent-yellow);
 }
 
 .badgeWaiting
 {
-  color: #cbd5e1;
-  border-color: #475569;
+  color: var(--color-text-muted-strong);
+  border-color: var(--color-border-subtle);
 }
 
 .badgeDone
 {
-  color: #4ade80;
-  border-color: #22c55e;
+  color: var(--color-accent-green);
+  border-color: var(--color-accent-green);
 }
 
 .badgeError
 {
-  color: #f87171;
-  border-color: #dc2626;
+  color: var(--color-accent-red);
+  border-color: var(--color-accent-red);
 }
 
 @keyframes spin

@@ -11,24 +11,24 @@
   width: 40px;
   height: 40px;
   padding: 0;
-  border: 1px solid #3b4252;
+  border: 1px solid var(--color-border-subtle);
   border-radius: 10px;
-  background-color: #11151d;
-  color: #cbd5e1;
+  background-color: var(--color-bg-surface-subtle);
+  color: var(--color-text-muted-strong);
   cursor: pointer;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .trigger:hover
 {
-  border-color: #6b7280;
-  background-color: #18202c;
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-surface-hover);
 }
 
 .trigger:focus,
 .trigger:focus-visible
 {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
@@ -39,10 +39,10 @@
   left: 0;
   min-width: 160px;
   padding: 6px 0;
-  border: 1px solid #2a2f3a;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  background-color: #151922;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background-color: var(--color-bg-surface);
+  box-shadow: 0 4px 12px var(--color-shadow);
   z-index: 100;
 }
 
@@ -53,7 +53,7 @@
   padding: 8px 16px;
   border: none;
   background: none;
-  color: #e5e7eb;
+  color: var(--color-text);
   font-size: 0.95rem;
   font-family: inherit;
   text-align: left;
@@ -63,12 +63,19 @@
 
 .item:hover
 {
-  background-color: #1f2937;
+  background-color: var(--color-bg-surface-elevated);
+}
+
+.itemWithIcon
+{
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .separator
 {
   height: 1px;
   margin: 6px 0;
-  background-color: #2a2f3a;
+  background-color: var(--color-border);
 }

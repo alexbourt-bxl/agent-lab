@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 import time
@@ -56,7 +57,7 @@ class WorkflowRunner:
     async def run(self, model: str | None = None) -> None:
         import time
 
-        from main import emit_agent_event, emit_event
+        from events import emit_agent_event, emit_event
         from tools import get_workflow_run_id, get_workflow_session_id
         from workflow_state import cancel_requested
 
@@ -89,15 +90,45 @@ class WorkflowRunner:
                 break
 
             current_agent = self.agents[current_agent_name]
-            turn_result = await current_agent.execute_turn(
-                model=model,
-                round_number=round_number,
-                max_rounds=self.max_rounds,
-                available_agents=self.agent_order,
+            turn_task = asyncio.create_task(
+                current_agent.execute_turn(
+                    model=model,
+                    round_number=round_number,
+                    max_rounds=self.max_rounds,
+                    available_agents=self.agent_order,
+                ),
+            )
+            cancel_task = asyncio.create_task(cancel_requested.wait())
+            done, pending = await asyncio.wait(
+                [turn_task, cancel_task],
+                return_when=asyncio.FIRST_COMPLETED,
             )
 
+            if cancel_task in done:
+                turn_task.cancel()
+                try:
+                    await turn_task
+                except asyncio.CancelledError:
+                    pass
+                elapsed = time.perf_counter() - workflow_start
+                await emit_event(
+                    event_type="system",
+                    message=f"{_workflow_prefix()}stopped by user ({self._format_elapsed(elapsed)}).",
+                    state="stopped",
+                    round_number=round_number - 1,
+                )
+                break
+
+            cancel_task.cancel()
+            try:
+                await cancel_task
+            except asyncio.CancelledError:
+                pass
+
+            turn_result = await turn_task
+
             if turn_result["done"]:
-                from main import emit_agent_output
+                from events import emit_agent_output
 
                 await emit_agent_output(current_agent.name, current_agent.output)
                 await emit_agent_event(
@@ -138,7 +169,7 @@ class WorkflowRunner:
                 break
 
             if next_agent_name != current_agent_name:
-                from main import emit_agent_output
+                from events import emit_agent_output
 
                 handoff_record = self._build_handoff_record(
                     source_agent_name=current_agent.name,
@@ -178,7 +209,7 @@ class WorkflowRunner:
             )
 
     async def _emit_initial_states(self) -> None:
-        from main import emit_agent_event
+        from events import emit_agent_event
 
         for agent_name in self.agent_order:
             await emit_agent_event(

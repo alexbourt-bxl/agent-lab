@@ -1,10 +1,64 @@
+/* Design system: theme tokens */
+:root,
+[data-theme="dark"]
+{
+  --color-bg-base: #0f1117;
+  --color-bg-surface: #151922;
+  --color-bg-surface-raised: #1e293b;
+  --color-bg-surface-elevated: #1f2937;
+  --color-bg-surface-subtle: #11151d;
+  --color-bg-surface-hover: #18202c;
+  --color-bg-surface-hover-strong: #273244;
+  --color-border: #2a2f3a;
+  --color-border-subtle: #3b4252;
+  --color-border-hover: #6b7280;
+  --color-text: #e5e7eb;
+  --color-text-strong: #f9fafb;
+  --color-text-muted: #94a3b8;
+  --color-text-muted-strong: #cbd5e1;
+  --color-focus: #60a5fa;
+  --color-accent-blue: #60a5fa;
+  --color-accent-yellow: #facc15;
+  --color-accent-green: #4ade80;
+  --color-accent-red: #f87171;
+  --color-overlay: rgba(255, 255, 255, 0.15);
+  --color-overlay-strong: rgba(255, 255, 255, 0.2);
+  --color-shadow: rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="light"]
+{
+  --color-bg-base: #f8fafc;
+  --color-bg-surface: #ffffff;
+  --color-bg-surface-raised: #f1f5f9;
+  --color-bg-surface-elevated: #e2e8f0;
+  --color-bg-surface-subtle: #f1f5f9;
+  --color-bg-surface-hover: #e2e8f0;
+  --color-bg-surface-hover-strong: #cbd5e1;
+  --color-border: #e2e8f0;
+  --color-border-subtle: #cbd5e1;
+  --color-border-hover: #94a3b8;
+  --color-text: #0f172a;
+  --color-text-strong: #020617;
+  --color-text-muted: #64748b;
+  --color-text-muted-strong: #475569;
+  --color-focus: #3b82f6;
+  --color-accent-blue: #2563eb;
+  --color-accent-yellow: #ca8a04;
+  --color-accent-green: #16a34a;
+  --color-accent-red: #dc2626;
+  --color-overlay: rgba(0, 0, 0, 0.08);
+  --color-overlay-strong: rgba(0, 0, 0, 0.15);
+  --color-shadow: rgba(0, 0, 0, 0.1);
+}
+
 :root
 {
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #e5e7eb;
-  background-color: #0f1117;
+  color: var(--color-text);
+  background-color: var(--color-bg-base);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -27,7 +81,7 @@ body,
 
 body
 {
-  background-color: #0f1117;
+  background-color: var(--color-bg-base);
 }
 
 button
@@ -44,6 +98,6 @@ button
 button:focus,
 button:focus-visible
 {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
