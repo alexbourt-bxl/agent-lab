@@ -80,15 +80,16 @@ async def emit_event(
     if resolved_run_id is not None:
         payload["runId"] = resolved_run_id
 
-    sync_workflow_event(
-        event_type=event_type,
-        message=message,
-        state=state,
-        agent_name=agent_name,
-        round_number=round_number,
-        agent_order=agent_order,
-        session_id=resolved_session_id,
-    )
+    if event_type != "thought":
+        sync_workflow_event(
+            event_type=event_type,
+            message=message,
+            state=state,
+            agent_name=agent_name,
+            round_number=round_number,
+            agent_order=agent_order,
+            session_id=resolved_session_id,
+        )
 
     await manager.broadcast(payload)
 

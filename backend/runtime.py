@@ -69,24 +69,42 @@ class WorkflowRunner:
         await self._emit_initial_states()
 
         current_agent_name = self._resolve_start_agent_name()
+        rounds_by_agent: dict[str, int] = {name: 0 for name in self.agent_order}
+        safety_limit = self.max_rounds * len(self.agent_order) * 2
+        total_turns = 0
 
-        for round_number in range(1, self.max_rounds + 1):
+        while total_turns < safety_limit:
+            total_turns += 1
             if stop_event.is_set():
                 elapsed = time.perf_counter() - workflow_start
+                last_round = rounds_by_agent.get(current_agent_name, 0)
 
                 await emit_event(
                     event_type="system",
                     message=f"{_workflow_prefix()}stopped by user ({self._format_elapsed(elapsed)}).",
                     state="stopped",
-                    round_number=round_number - 1,
+                    round_number=last_round,
                 )
                 break
 
+            agent_round = rounds_by_agent[current_agent_name] + 1
+            if agent_round > self.max_rounds:
+                elapsed = time.perf_counter() - workflow_start
+
+                await emit_event(
+                    event_type="system",
+                    message=f"{_workflow_prefix()}stopped after reaching the max round limit ({self._format_elapsed(elapsed)}).",
+                    state="done",
+                    round_number=self.max_rounds,
+                )
+                break
+
+            rounds_by_agent[current_agent_name] = agent_round
             current_agent = self.agents[current_agent_name]
             turn_task = asyncio.create_task(
                 current_agent.execute_turn(
                     model=model,
-                    round_number=round_number,
+                    round_number=agent_round,
                     max_rounds=self.max_rounds,
                     available_agents=self.agent_order,
                     cancel_event=stop_event,
@@ -105,11 +123,13 @@ class WorkflowRunner:
                 except asyncio.CancelledError:
                     pass
                 elapsed = time.perf_counter() - workflow_start
+                last_round = rounds_by_agent.get(current_agent_name, 0)
+
                 await emit_event(
                     event_type="system",
                     message=f"{_workflow_prefix()}stopped by user ({self._format_elapsed(elapsed)}).",
                     state="stopped",
-                    round_number=round_number - 1,
+                    round_number=last_round,
                 )
                 break
 
@@ -130,19 +150,19 @@ class WorkflowRunner:
                     event_type="state",
                     state="done",
                     message=f"{current_agent.name} completed the workflow.",
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 await emit_event(
                     event_type="workflow_result",
                     message=current_agent.output,
                     state="done",
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 await emit_event(
                     event_type="system",
                     message="Workflow completed.",
                     state="done",
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 break
 
@@ -158,7 +178,7 @@ class WorkflowRunner:
                     event_type="system",
                     message=f"{_workflow_prefix()}stopped because no next agent was available ({self._format_elapsed(elapsed)}).",
                     state="done",
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 break
 
@@ -169,7 +189,7 @@ class WorkflowRunner:
                     source_agent_name=current_agent.name,
                     target_agent_name=next_agent_name,
                     turn_result=turn_result,
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 if current_agent.output:
                     await emit_agent_output(current_agent.name, current_agent.output)
@@ -180,33 +200,24 @@ class WorkflowRunner:
                     event_type="handoff",
                     message=f"Handoff: {current_agent.name} → {next_agent_name}",
                     state="handoff",
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 await emit_agent_event(
                     agent_name=current_agent.name,
                     event_type="state",
                     state="waiting_for_peer",
                     message=f"Waiting for {next_agent_name}.",
-                    round_number=round_number,
+                    round_number=agent_round,
                 )
                 await emit_agent_event(
                     agent_name=next_agent_name,
                     event_type="handoff",
                     state="waiting_for_turn",
                     message=self._format_handoff_event_message(handoff_record),
-                    round_number=round_number,
+                    round_number=rounds_by_agent.get(next_agent_name, 0) + 1,
                 )
 
             current_agent_name = next_agent_name
-        else:
-            elapsed = time.perf_counter() - workflow_start
-
-            await emit_event(
-                event_type="system",
-                message=f"{_workflow_prefix()}stopped after reaching the max round limit ({self._format_elapsed(elapsed)}).",
-                state="done",
-                round_number=self.max_rounds,
-            )
 
     async def _emit_initial_states(self) -> None:
         from events import emit_agent_event

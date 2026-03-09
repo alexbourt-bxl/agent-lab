@@ -3,6 +3,7 @@
   "private": true,
   "description": "Local AI agent experimentation environment",
   "scripts": {
+    "start": "node scripts/start.js",
     "dev:backend": "cd backend && python main.py",
     "dev:frontend": "cd frontend && npm run dev"
   }

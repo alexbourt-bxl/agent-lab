@@ -24,7 +24,16 @@ Use this repository to prototype, test, and iterate on local AI agent workflows.
 
 Optional: [SearXNG](https://docs.searxng.org/) for the WebSearch tool (configure URL in session settings).
 
-### 1. Supabase (local storage)
+### Quick start
+
+1. **Supabase:** `npx supabase start` → copy API URL and service_role from `npx supabase status` → copy `.env.example` to `.env` and set `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` → `npx supabase db reset`
+2. **Backend deps:** `cd backend && pip install -r requirements.txt`
+3. **Frontend deps:** `cd frontend && npm install`
+4. **Run:** From repo root, `npm start` (starts backend and frontend in parallel)
+
+Backend: `http://localhost:8000` · Frontend: `http://localhost:5173`
+
+### Supabase (local storage)
 
 Session data, agent output, and saved agents are stored in Supabase. Supabase is the canonical source of truth; see [docs/PERSISTENCE.md](docs/PERSISTENCE.md).
 
@@ -36,26 +45,28 @@ Session data, agent output, and saved agents are stored in Supabase. Supabase is
    - `SUPABASE_SERVICE_KEY` – the service_role key
 5. `npx supabase db reset` – apply migrations
 
-### 2. Backend
+### Backend
 
 From repo root:
 
 - **Windows:** `.\start-backend.ps1`
 - **Other:** `./start-backend.sh` or `cd backend && pip install -r requirements.txt && python main.py`
+- **npm:** `npm run dev:backend`
 
-Or: `npm run dev:backend`
+Runs at `http://localhost:8000`. LLM server URL and model are configurable per session in Settings (default: Ollama at `http://localhost:11434`, model `qwen3:4b`).
 
-Backend runs at `http://localhost:8000`. LLM server URL and model are configurable per session in the Settings page (default: Ollama at `http://localhost:11434`, model `qwen3:4b`).
-
-### 3. Frontend
+### Frontend
 
 From repo root:
 
 - `cd frontend && npm install && npm run dev`
+- **npm:** `npm run dev:frontend`
 
-Or: `npm run dev:frontend`
+Runs at `http://localhost:5173` and talks to the backend via `VITE_API_URL` in `frontend/.env` (default: `http://localhost:8000`).
 
-Frontend runs at `http://localhost:5173` and talks to the backend via `VITE_API_URL` in `frontend/.env` (default: `http://localhost:8000`).
+### Run both
+
+`npm start` from the repo root starts backend and frontend in parallel. Use Ctrl+C to stop both.
 
 ## Workflow model
 

@@ -12,7 +12,11 @@
   transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
-.button:focus,
+.button:focus
+{
+  outline: none;
+}
+
 .button:focus-visible
 {
   outline: 2px solid var(--color-focus);
@@ -67,6 +71,12 @@
   background-color: var(--color-bg-surface-hover-strong);
 }
 
+.buttonPrimary:active:not(:disabled)
+{
+  background-color: var(--color-bg-surface-hover-strong);
+  border-color: var(--color-border);
+}
+
 .buttonSecondary
 {
   border: 1px solid var(--color-border-subtle);
@@ -78,6 +88,11 @@
 {
   border-color: var(--color-border-hover);
   background-color: var(--color-bg-surface-hover);
+}
+
+.buttonSecondary:active:not(:disabled)
+{
+  background-color: var(--color-bg-surface-hover-strong);
 }
 
 .buttonRun
@@ -94,6 +109,12 @@
   background-color: var(--color-accent-green-hover);
 }
 
+.buttonRun:active:not(:disabled)
+{
+  background-color: var(--color-accent-green-hover);
+  filter: brightness(0.92);
+}
+
 .buttonRunActive
 {
   min-width: 120px;
@@ -106,6 +127,12 @@
 {
   border-color: var(--color-accent-orange-hover);
   background-color: var(--color-accent-orange-hover);
+}
+
+.buttonRunActive:active:not(:disabled)
+{
+  background-color: var(--color-accent-orange-hover);
+  filter: brightness(0.92);
 }
 
 .buttonClearLogs
@@ -121,4 +148,9 @@
 {
   border-color: var(--color-border-hover);
   background-color: var(--color-bg-surface-hover);
+}
+
+.buttonClearLogs:active:not(:disabled)
+{
+  background-color: var(--color-bg-surface-hover-strong);
 }

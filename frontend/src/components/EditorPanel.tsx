@@ -110,6 +110,8 @@ type EditorPanelProps =
   currentRound: number;
   workflowStatus: string;
   workflowResult: string | null;
+  workflowRunning?: boolean;
+  workflowElapsedTime?: string;
   activeTab: string;
   onTabChange: (tab: string) => void;
   onCloseAgentTab: (agentName: string) => void;
@@ -134,6 +136,8 @@ function EditorPanel(
   currentRound = 0,
   workflowStatus = 'idle',
   workflowResult,
+  workflowRunning = false,
+  workflowElapsedTime,
   activeTab,
   onTabChange,
   onCloseAgentTab,
@@ -192,7 +196,7 @@ function EditorPanel(
       <div className={styles.tabList}>
         <button
           type="button"
-          className={activeTab === 'workflow' ? styles.tabActive : styles.tab}
+          className={`${activeTab === 'workflow' ? styles.tabActive : styles.tab} ${workflowStatus === 'done' ? styles.tabWorkflowDone : ''} ${workflowStatus === 'error' ? styles.tabWorkflowError : ''}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) =>
           {
@@ -200,7 +204,10 @@ function EditorPanel(
             (e.currentTarget as HTMLElement).blur();
           }}
         >
-          Workflow
+          <span className={styles.tabContent}>
+            {workflowRunning && <span className={styles.tabSpinner} aria-hidden />}
+            Workflow
+          </span>
         </button>
         {agentConfigs.map((config) =>
         {
@@ -266,13 +273,20 @@ function EditorPanel(
       <div className={styles.tabContentArea}>
         {activeTab === 'workflow' && (
           <>
-            <div className={styles.workflowHeader}>
+            <div
+              className={`${styles.workflowHeader} ${workflowStatus === 'done' ? styles.workflowHeaderDone : ''} ${workflowStatus === 'error' ? styles.workflowHeaderError : ''}`}
+            >
               <span className={styles.workflowId}>
                 ID: {workflowId ?? '—'}
               </span>
+              {workflowRunning && workflowElapsedTime != null && (
+                <span className={styles.workflowElapsed}>{workflowElapsedTime}</span>
+              )}
               <div className={styles.workflowProgress}>
                 <span className={styles.workflowProgressLabel}>
-                  Round {currentRound} of {maxRounds}
+                  {currentAgent != null
+                    ? `${currentAgent} R${currentRound} of ${maxRounds}`
+                    : `Round ${currentRound} of ${maxRounds}`}
                 </span>
                 {currentAgent != null && (
                   <span className={styles.workflowProgressAgent}>

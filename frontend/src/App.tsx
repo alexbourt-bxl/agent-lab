@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { ArrowLeft, Play } from 'lucide-react';
+import { ArrowLeft, Play, SquareStop } from 'lucide-react';
 import { formatElapsedSeconds } from './utils/formatElapsed';
 import {
   createSessionUrl,
@@ -55,6 +55,7 @@ type LogEntry =
   round?: number;
   sessionId?: string;
   runId?: string;
+  agentOrder?: string[];
 };
 
 type AgentStatus =
@@ -128,6 +129,7 @@ function App()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(readStoredSessionId);
   const [editorActiveTab, setEditorActiveTab] = useState('workflow');
   const [isRunning, setIsRunning] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [, setTick] = useState(0);
   const maxRounds = getEffectiveMaxRounds(code);
   const [logHeightPercent, setLogHeightPercent] = useState(() => readPercentageCookie(LOG_HEIGHT_COOKIE_NAME, 28, 18, 55));
@@ -136,6 +138,9 @@ function App()
   const closedSocketIdsRef = useRef<Set<string>>(new Set());
   const currentSessionIdRef = useRef<string | null>(currentSessionId);
   const sessionRefreshTimeoutRef = useRef<number | null>(null);
+  const sessionRefreshInFlightRef = useRef<boolean>(false);
+  const sessionRefreshPendingRef = useRef<{ sessionId: string } | null>(null);
+  const sessionLoadGenerationRef = useRef<number>(0);
   const codeRef = useRef<string>(code);
   const lastSyncedCodeRef = useRef<string | null>(null);
 
@@ -157,6 +162,7 @@ function App()
     setCurrentAgent(null);
     setCurrentRound(0);
     setWorkflowStatus('idle');
+    setIsStopping(false);
     workflowStartTimeRef.current = null;
   };
 
@@ -174,11 +180,20 @@ function App()
   ) =>
   {
     const restoreWorkflowResult = options?.restoreWorkflowResult ?? true;
+    const loadId = ++sessionLoadGenerationRef.current;
     try
     {
       const response = await axios.get<WorkflowSessionSnapshot>(
         sessionWorkflowUrl(sessionId),
       );
+      if (sessionLoadGenerationRef.current !== loadId)
+      {
+        return;
+      }
+      if (currentSessionIdRef.current !== sessionId)
+      {
+        return;
+      }
       const snapshot = response.data;
       const snapshotAgents = snapshot.agents ?? {};
       const orderedAgentNames = snapshot.agentOrder ?? [];
@@ -278,6 +293,11 @@ function App()
         }
       }
 
+      if (sessionLoadGenerationRef.current !== loadId || currentSessionIdRef.current !== sessionId)
+      {
+        return;
+      }
+
       setAgentOrder(agentNames);
       setAgentStatuses(nextAgentStatuses);
       setAgentOutputs(nextAgentOutputs);
@@ -357,16 +377,38 @@ function App()
 
   const scheduleSessionRefresh = (sessionId: string) =>
   {
-    if (sessionRefreshTimeoutRef.current !== null)
+    sessionRefreshPendingRef.current = { sessionId };
+
+    if (sessionRefreshInFlightRef.current)
     {
-      window.clearTimeout(sessionRefreshTimeoutRef.current);
+      return;
     }
 
-    sessionRefreshTimeoutRef.current = window.setTimeout(() =>
+    if (sessionRefreshTimeoutRef.current !== null)
+    {
+      return;
+    }
+
+    sessionRefreshTimeoutRef.current = window.setTimeout(async () =>
     {
       sessionRefreshTimeoutRef.current = null;
-      void loadSession(sessionId);
-    }, 50);
+      const sid = sessionRefreshPendingRef.current?.sessionId ?? sessionId;
+      sessionRefreshInFlightRef.current = true;
+      try
+      {
+        await loadSession(sid);
+      }
+      finally
+      {
+        sessionRefreshInFlightRef.current = false;
+        const pending = sessionRefreshPendingRef.current;
+        sessionRefreshPendingRef.current = null;
+        if (pending !== null)
+        {
+          scheduleSessionRefresh(pending.sessionId);
+        }
+      }
+    }, 100);
   };
 
   useEffect(() =>
@@ -602,7 +644,11 @@ function App()
         signal,
       });
 
-      if (typeof response.data.sessionId === 'string' && response.data.sessionId !== '')
+      if (response.data?.status === 'error')
+      {
+        setWorkflowStatus('error');
+      }
+      else if (typeof response.data.sessionId === 'string' && response.data.sessionId !== '')
       {
         lastSyncedCodeRef.current = code;
         await loadSession(response.data.sessionId);
@@ -614,6 +660,7 @@ function App()
 
       if (!isAborted)
       {
+        setWorkflowStatus('error');
         setLogs((currentLogs) => [
           ...currentLogs,
           {
@@ -634,6 +681,7 @@ function App()
 
   const handleStopWorkflow = async () =>
   {
+    setIsStopping(true);
     try
     {
       await axios.post(stopWorkflowUrl(), { sessionId: currentSessionId });
@@ -663,17 +711,141 @@ function App()
 
         if (typeof logEntry.sessionId === 'string' && logEntry.sessionId !== '')
         {
+          const sessionMatches =
+            currentSessionIdRef.current === null ||
+            currentSessionIdRef.current === logEntry.sessionId;
+
           if (logEntry.eventType === 'workflow_started')
           {
             persistCurrentSessionId(logEntry.sessionId);
-            workflowStartTimeRef.current = Date.now();
+            const parsedTimestamp =
+              typeof logEntry.timestamp === 'string'
+                ? Date.parse(logEntry.timestamp)
+                : Number.NaN;
+            workflowStartTimeRef.current =
+              !Number.isNaN(parsedTimestamp) ? parsedTimestamp : Date.now();
+            setWorkflowStatus('running');
+            if (Array.isArray(logEntry.agentOrder) && logEntry.agentOrder.length > 0)
+            {
+              setAgentOrder(logEntry.agentOrder);
+            }
             void loadSession(logEntry.sessionId);
           }
-
-          if (
-            currentSessionIdRef.current === null ||
-            currentSessionIdRef.current === logEntry.sessionId
+          else if (logEntry.eventType === 'state' && logEntry.agentName != null)
+          {
+            const parsedTimestamp =
+              typeof logEntry.timestamp === 'string'
+                ? Date.parse(logEntry.timestamp)
+                : Number.NaN;
+            const ts = !Number.isNaN(parsedTimestamp) ? parsedTimestamp : Date.now();
+            setAgentStatuses((prev) =>
+            {
+              const existing = prev[logEntry.agentName!];
+              const stepStartTime =
+                logEntry.state === 'working' || logEntry.state === 'executing'
+                  ? ts
+                  : logEntry.state === 'thinking'
+                    ? (existing?.stepStartTime ?? ts)
+                    : undefined;
+              const next = { ...prev };
+              next[logEntry.agentName!] = {
+                name: logEntry.agentName!,
+                state: logEntry.state ?? 'waiting_for_turn',
+                message: logEntry.message ?? '',
+                round: logEntry.round,
+                stepStartTime,
+              };
+              return next;
+            });
+            if (logEntry.agentName != null)
+            {
+              setCurrentAgent(logEntry.agentName);
+            }
+            if (typeof logEntry.round === 'number')
+            {
+              setCurrentRound(logEntry.round);
+            }
+          }
+          else if (logEntry.eventType === 'handoff' && logEntry.agentName != null)
+          {
+            setCurrentAgent(logEntry.agentName);
+            if (typeof logEntry.round === 'number')
+            {
+              setCurrentRound(logEntry.round);
+            }
+          }
+          else if (logEntry.eventType === 'workflow_result')
+          {
+            setWorkflowResult(logEntry.message ?? null);
+            if (logEntry.state === 'done')
+            {
+              setWorkflowStatus('done');
+            }
+          }
+          else if (
+            logEntry.eventType === 'system' &&
+            logEntry.state != null &&
+            ['done', 'stopped', 'error'].includes(logEntry.state)
           )
+          {
+            setWorkflowStatus(logEntry.state);
+            if (logEntry.state === 'stopped')
+            {
+              setAgentStatuses((prev) =>
+              {
+                const next = { ...prev };
+                for (const name of Object.keys(next))
+                {
+                  const s = next[name];
+                  if (
+                    s.state === 'working' ||
+                    s.state === 'thinking' ||
+                    s.state === 'executing'
+                  )
+                  {
+                    next[name] = {
+                      ...s,
+                      state: 'waiting_for_turn',
+                      message: 'Workflow stopped.',
+                      stepStartTime: undefined,
+                    };
+                  }
+                }
+                return next;
+              });
+            }
+          }
+          else if (
+            logEntry.eventType === 'thought' &&
+            logEntry.agentName != null &&
+            typeof logEntry.round === 'number'
+          )
+          {
+            const agentName = logEntry.agentName;
+            const round = logEntry.round;
+            const message = logEntry.message ?? '';
+            setAgentOutputsByRound((prev) =>
+            {
+              const next = { ...prev };
+              const byRound = { ...(next[agentName] ?? {}) };
+              byRound[round] = message;
+              next[agentName] = byRound;
+              return next;
+            });
+            setAgentRounds((prev) =>
+            {
+              const current = prev[agentName] ?? [];
+              if (current.includes(round))
+              {
+                return prev;
+              }
+              const next = [...current, round].sort((a, b) => a - b);
+              return { ...prev, [agentName]: next };
+            });
+            setAgentOutputs((prev) => ({ ...prev, [agentName]: message }));
+          }
+
+          if (sessionMatches)
           {
             scheduleSessionRefresh(logEntry.sessionId);
           }
@@ -726,12 +898,16 @@ function App()
   }, [logHeightPercent]);
 
   const hasActiveStep = Object.values(agentStatuses).some(
-    (s) => s.state === 'working' || s.state === 'executing',
+    (s) =>
+      s.state === 'working' ||
+      s.state === 'executing' ||
+      s.state === 'thinking',
   );
 
   useEffect(() =>
   {
-    if (!hasActiveStep)
+    const shouldTick = hasActiveStep || workflowStatus === 'running' || isRunning;
+    if (!shouldTick)
     {
       return;
     }
@@ -739,7 +915,7 @@ function App()
     const id = setInterval(() => setTick((t) => t + 1), 1000);
 
     return () => clearInterval(id);
-  }, [hasActiveStep]);
+  }, [hasActiveStep, workflowStatus, isRunning]);
 
   const workflowElapsedSeconds =
     workflowStartTimeRef.current !== null
@@ -825,17 +1001,13 @@ function App()
             </Button>
           ) : (
             <Button
-              variant={isRunning || hasActiveStep ? 'runActive' : 'run'}
-              onClick={isRunning ? handleStopWorkflow : handleRunAgent}
-              icon={!isRunning ? <Play size={16} /> : undefined}
-              showSpinner={isRunning || hasActiveStep}
-              elapsedTime={
-                (isRunning || hasActiveStep)
-                  ? formatElapsedSeconds(workflowElapsedSeconds)
-                  : undefined
-              }
+              variant={isRunning || hasActiveStep || isStopping ? 'runActive' : 'run'}
+              onClick={isStopping ? undefined : (isRunning || hasActiveStep ? handleStopWorkflow : handleRunAgent)}
+              icon={isStopping ? undefined : (isRunning || hasActiveStep ? <SquareStop size={14} /> : <Play size={16} />)}
+              showSpinner={isStopping}
+              disabled={isStopping}
             >
-              {isRunning ? 'Stop Workflow' : 'Run Workflow'}
+              {isStopping ? 'Stopping Workflow...' : (isRunning || hasActiveStep ? 'Stop Workflow' : 'Run Workflow')}
             </Button>
           )}
         </div>
@@ -864,6 +1036,12 @@ function App()
                 currentRound={currentRound}
                 workflowStatus={workflowStatus}
                 workflowResult={workflowResult}
+                workflowRunning={isRunning || hasActiveStep}
+                workflowElapsedTime={
+                  (isRunning || hasActiveStep)
+                    ? formatElapsedSeconds(workflowElapsedSeconds)
+                    : undefined
+                }
                 activeTab={editorActiveTab}
                 onTabChange={setEditorActiveTab}
                 onCloseAgentTab={(agentName: string) =>

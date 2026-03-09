@@ -176,6 +176,15 @@ async def run_workflow(
             "sessionId": session_id,
             "runId": run_id,
         }
+    except Exception as e:
+        await emit_event(
+            event_type="system",
+            message=f"Workflow error: {e}",
+            state="error",
+            session_id=session_id,
+            run_id=run_id,
+        )
+        raise
     finally:
         unregister_cancel_event(session_id)
         set_workflow_session_id(None)

@@ -59,11 +59,19 @@ def _search_searxng(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[d
     search_url = f"{base}/search?q={quote_plus(query)}&format=json"
     results: list[dict[str, Any]] = []
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
     try:
-        with httpx.Client(timeout=SEARCH_TIMEOUT) as client:
+        with httpx.Client(timeout=SEARCH_TIMEOUT, headers=headers) as client:
             resp = client.get(search_url)
             resp.raise_for_status()
             data = resp.json()
+    except httpx.HTTPStatusError as e:
+        hint = ""
+        if e.response.status_code == 403:
+            hint = " (SearXNG may block requests: check instance allows API access, or try a different URL in Settings)"
+        return [{"error": f"{e}{hint}", "title": "Search failed", "url": "", "content": ""}]
     except Exception as e:
         return [{"error": str(e), "title": "Search failed", "url": "", "content": ""}]
 

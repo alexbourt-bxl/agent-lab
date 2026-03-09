@@ -533,6 +533,9 @@ def sync_workflow_event(
             if state in {"working", "executing"}:
                 if previous_state != state or agent_snapshot.get("stepStartedAt") is None:
                     agent_snapshot["stepStartedAt"] = now
+            elif state == "thinking":
+                if agent_snapshot.get("stepStartedAt") is None:
+                    agent_snapshot["stepStartedAt"] = now
             elif state is not None:
                 agent_snapshot["stepStartedAt"] = None
 

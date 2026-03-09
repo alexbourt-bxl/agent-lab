@@ -87,6 +87,7 @@
   animation: tabSpin var(--animation-spin-duration) linear infinite;
 }
 
+
 @keyframes tabSpin
 {
   from
@@ -211,6 +212,33 @@
   gap: var(--space-6);
   padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-bg-surface-elevated);
+}
+
+.workflowHeaderDone
+{
+  background-color: var(--color-status-done-bg);
+  border-bottom-color: var(--color-accent-green-border);
+}
+
+.workflowHeaderError
+{
+  background-color: var(--color-status-error-bg);
+  border-bottom-color: var(--color-accent-red);
+}
+
+.tabWorkflowDone
+{
+  background-color: var(--color-status-done-bg);
+  color: var(--color-status-done);
+  border-color: var(--color-accent-green-border);
+}
+
+.tabWorkflowError
+{
+  background-color: var(--color-status-error-bg);
+  color: var(--color-status-error);
+  border-color: var(--color-accent-red-border);
 }
 
 .workflowProgress
@@ -262,10 +290,29 @@
   color: var(--color-text-muted);
 }
 
+.workflowStatusBadge[data-status="stopped"]
+{
+  background-color: var(--color-bg-surface-raised);
+  color: var(--color-text-muted);
+}
+
+.workflowStatusBadge[data-status="error"]
+{
+  background-color: var(--color-status-error-bg);
+  color: var(--color-status-error);
+}
+
 .workflowId
 {
   font-size: 0.9rem;
   color: var(--color-text-muted);
+}
+
+.workflowElapsed
+{
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted-strong);
 }
 
 .agentHeader
