@@ -53,6 +53,7 @@ type LogEntry =
   agentName?: string;
   state?: string;
   round?: number;
+  output?: string;
   sessionId?: string;
   runId?: string;
   agentOrder?: string[];
@@ -824,6 +825,35 @@ function App()
             const agentName = logEntry.agentName;
             const round = logEntry.round;
             const message = logEntry.message ?? '';
+            setAgentOutputsByRound((prev) =>
+            {
+              const next = { ...prev };
+              const byRound = { ...(next[agentName] ?? {}) };
+              byRound[round] = message;
+              next[agentName] = byRound;
+              return next;
+            });
+            setAgentRounds((prev) =>
+            {
+              const current = prev[agentName] ?? [];
+              if (current.includes(round))
+              {
+                return prev;
+              }
+              const next = [...current, round].sort((a, b) => a - b);
+              return { ...prev, [agentName]: next };
+            });
+            setAgentOutputs((prev) => ({ ...prev, [agentName]: message }));
+          }
+          else if (
+            logEntry.eventType === 'agent_output' &&
+            logEntry.agentName != null &&
+            typeof logEntry.round === 'number'
+          )
+          {
+            const agentName = logEntry.agentName;
+            const round = logEntry.round;
+            const message = logEntry.output ?? '';
             setAgentOutputsByRound((prev) =>
             {
               const next = { ...prev };

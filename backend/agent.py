@@ -50,7 +50,7 @@ class Agent:
         self.inbox: list[dict[str, Any]] = []
         self.llm = llm or get_llm_client()
         self.tools: dict[str, Any] = {}
-        for tool in tools if tools else _default_tools():
+        for tool in (tools if tools is not None else _default_tools()):
             t = tool() if callable(tool) and not hasattr(tool, "name") else tool
             self.register_tool(t)
 

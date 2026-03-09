@@ -355,14 +355,19 @@ function EditorPanel(
               return (
                 <>
                   <div className={`${styles.agentHeader} ${isWorking ? styles.agentHeaderWorking : ''}`}>
-                    {stepElapsedSeconds !== undefined && (
-                      <span className={styles.agentElapsed}>
-                        {formatElapsedSeconds(stepElapsedSeconds)}
+                    <div className={styles.agentHeaderLeft}>
+                      <span className={styles.agentStatus}>
+                        {status?.state?.replaceAll('_', ' ') ?? '—'} {status?.message ? `· ${status.message}` : ''}
                       </span>
-                    )}
-                    <span className={styles.agentStatus}>
-                      {status?.state?.replaceAll('_', ' ') ?? '—'} {status?.message ? `· ${status.message}` : ''}
-                    </span>
+                    </div>
+                    <div className={styles.agentHeaderCenter}>
+                      {stepElapsedSeconds !== undefined && (
+                        <span className={styles.agentElapsed}>
+                          {formatElapsedSeconds(stepElapsedSeconds)}
+                        </span>
+                      )}
+                    </div>
+                    <div className={styles.agentHeaderRight}>
                     {rounds.length > 1 && (
                       <div className={styles.roundSelector}>
                         {rounds.map((r) => (
@@ -377,6 +382,7 @@ function EditorPanel(
                         ))}
                       </div>
                     )}
+                    </div>
                   </div>
             <div className={styles.twoPaneSplit} ref={splitRef}>
               <div className={styles.codePane} style={{ width: `calc(${codePaneWidthPercent}% - var(--space-resize-gap))` }}>

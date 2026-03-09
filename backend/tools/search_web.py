@@ -54,6 +54,115 @@ def _get_searxng_base_url() -> str:
     return url.rstrip("/")
 
 
+def _search_searxng_html(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[str, Any]]:
+    """Parse SearXNG HTML results when JSON format is disabled (403)."""
+    base = _get_searxng_base_url()
+    search_url = f"{base}/search?q={quote_plus(query)}"
+    results: list[dict[str, Any]] = []
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    try:
+        with httpx.Client(timeout=SEARCH_TIMEOUT, headers=headers) as client:
+            resp = client.get(search_url)
+            resp.raise_for_status()
+            html = resp.text
+    except Exception:
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    urls_section = soup.find(id="urls")
+    if not urls_section:
+        return []
+
+    seen_urls: set[str] = set()
+    result_items = urls_section.find_all("article", limit=max_results + 5)
+    if not result_items:
+        result_items = urls_section.find_all(class_=re.compile(r"result", re.I), limit=max_results + 5)
+
+    for article in result_items:
+        if len(results) >= max_results:
+            break
+
+        link = article.find("a", href=lambda h: h and h.startswith("http") and "cached" not in h.lower())
+        if not link or not link.get("href"):
+            continue
+
+        url = link.get("href", "").strip()
+        if not url.startswith("http"):
+            continue
+
+        parsed = urlparse(url)
+        path_lower = parsed.path.lower()
+        if any(path_lower.endswith(ext) for ext in SKIP_EXTENSIONS):
+            continue
+
+        norm = url.rstrip("/")
+        if norm in seen_urls:
+            continue
+        seen_urls.add(norm)
+
+        title = (link.get_text(strip=True) or "")[:200]
+
+        content_elem = article.find(class_=re.compile(r"content|result-content", re.I))
+        if content_elem:
+            snippet = content_elem.get_text(separator=" ", strip=True)[:500]
+        else:
+            snippet = article.get_text(separator=" ", strip=True)
+            if link.get_text(strip=True):
+                snippet = snippet.replace(link.get_text(strip=True), "", 1).strip()
+            snippet = snippet[:500]
+
+        results.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+            }
+        )
+
+    return results
+
+
+def _search_duckduckgo(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[str, Any]]:
+    """Fallback search via DuckDuckGo when SearXNG blocks API access."""
+    try:
+        from ddgs import DDGS
+
+        raw = DDGS().text(query, max_results=max_results)
+        results: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for item in raw:
+            if len(results) >= max_results:
+                break
+            if not isinstance(item, dict):
+                continue
+            url = item.get("href") or item.get("url") or ""
+            if not isinstance(url, str) or not url.startswith("http"):
+                continue
+            parsed = urlparse(url)
+            path_lower = parsed.path.lower()
+            if any(path_lower.endswith(ext) for ext in SKIP_EXTENSIONS):
+                continue
+            norm = url.rstrip("/")
+            if norm in seen_urls:
+                continue
+            seen_urls.add(norm)
+            title = item.get("title") or ""
+            snippet = item.get("body") or item.get("content") or ""
+            results.append(
+                {
+                    "title": str(title)[:200],
+                    "url": url,
+                    "snippet": str(snippet)[:500],
+                }
+            )
+        return results
+    except Exception:
+        return []
+
+
 def _search_searxng(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[dict[str, Any]]:
     base = _get_searxng_base_url()
     search_url = f"{base}/search?q={quote_plus(query)}&format=json"
@@ -68,11 +177,26 @@ def _search_searxng(query: str, max_results: int = MAX_SEARCH_RESULTS) -> list[d
             resp.raise_for_status()
             data = resp.json()
     except httpx.HTTPStatusError as e:
-        hint = ""
         if e.response.status_code == 403:
-            hint = " (SearXNG may block requests: check instance allows API access, or try a different URL in Settings)"
-        return [{"error": f"{e}{hint}", "title": "Search failed", "url": "", "content": ""}]
+            html_results = _search_searxng_html(query, max_results)
+            if html_results:
+                return html_results
+            fallback = _search_duckduckgo(query, max_results)
+            if fallback:
+                return fallback
+            return [
+                {
+                    "error": f"{e} (SearXNG blocks API: add 'json' to search.formats in settings.yml, or use Settings to change URL)",
+                    "title": "Search failed",
+                    "url": "",
+                    "content": "",
+                }
+            ]
+        return [{"error": str(e), "title": "Search failed", "url": "", "content": ""}]
     except Exception as e:
+        fallback = _search_duckduckgo(query, max_results)
+        if fallback:
+            return fallback
         return [{"error": str(e), "title": "Search failed", "url": "", "content": ""}]
 
     raw = data.get("results")

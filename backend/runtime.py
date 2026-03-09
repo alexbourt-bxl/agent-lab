@@ -144,7 +144,11 @@ class WorkflowRunner:
             if turn_result["done"]:
                 from events import emit_agent_output
 
-                await emit_agent_output(current_agent.name, current_agent.output)
+                await emit_agent_output(
+                    current_agent.name,
+                    current_agent.output,
+                    round_number=agent_round,
+                )
                 await emit_agent_event(
                     agent_name=current_agent.name,
                     event_type="state",
@@ -192,7 +196,11 @@ class WorkflowRunner:
                     round_number=agent_round,
                 )
                 if current_agent.output:
-                    await emit_agent_output(current_agent.name, current_agent.output)
+                    await emit_agent_output(
+                        current_agent.name,
+                        current_agent.output,
+                        round_number=agent_round,
+                    )
                 next_agent = self.agents[next_agent_name]
                 next_agent.receive_handoff(handoff_record)
 

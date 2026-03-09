@@ -313,6 +313,9 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted-strong);
+  background-color: #0001;
+  padding: 0.2rem 0.7rem;
+  border-radius: 1rem;
 }
 
 .agentHeader
@@ -325,6 +328,27 @@
   background-color: var(--color-bg-surface-elevated);
   font-size: 0.9rem;
   color: var(--color-text);
+}
+
+.agentHeaderLeft
+{
+  flex: 1;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.agentHeaderCenter
+{
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.agentHeaderRight
+{
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .agentHeaderWorking
@@ -358,13 +382,15 @@
 {
   font-weight: 500;
   color: var(--color-accent-blue);
+  background-color: #ffffff2a;
+  padding: 0.2rem 0.7rem;
+  border-radius: 1rem;
 }
 
 .roundSelector
 {
   display: flex;
   gap: 4px;
-  margin-left: auto;
 }
 
 .roundBtn,
@@ -424,6 +450,16 @@
   font-family: 'Cascadia Code', 'Consolas', monospace;
   font-size: var(--font-size-monospace);
   color: var(--color-text);
+}
+
+[data-theme="dark"] 
+.outputContent {
+  background-color: #ffffff0c;
+}
+
+[data-theme="light"] 
+.outputContent {
+  background-color: #0000000c;
 }
 
 .outputPre

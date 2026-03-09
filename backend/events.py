@@ -10,8 +10,10 @@ from tools import (
     get_workflow_run_id,
     get_workflow_session_id,
     record_agent_output,
+    record_result_file,
     sync_workflow_event,
 )
+from tools.workflow import _agent_name_to_kebab
 
 
 class ConnectionManager:
@@ -110,7 +112,11 @@ async def emit_agent_event(
     )
 
 
-async def emit_agent_output(agent_name: str, output: str) -> None:
+async def emit_agent_output(
+    agent_name: str,
+    output: str,
+    round_number: int | None = None,
+) -> None:
     session_id = get_workflow_session_id()
     run_id = get_workflow_run_id()
     payload: dict[str, Any] = {
@@ -124,8 +130,26 @@ async def emit_agent_output(agent_name: str, output: str) -> None:
         payload["sessionId"] = session_id
     if run_id is not None:
         payload["runId"] = run_id
+    if round_number is not None:
+        payload["round"] = round_number
 
     record_agent_output(agent_name=agent_name, session_id=session_id)
+
+    if (
+        output
+        and session_id is not None
+        and round_number is not None
+    ):
+        kebab = _agent_name_to_kebab(agent_name)
+        filename = f"{kebab}_{round_number}.md"
+        record_result_file(
+            filename,
+            output,
+            session_id=session_id,
+            agent_name=agent_name,
+            round_number=round_number,
+        )
+
     await manager.broadcast(payload)
 
 

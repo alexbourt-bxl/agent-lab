@@ -22,7 +22,14 @@ Use this repository to prototype, test, and iterate on local AI agent workflows.
 - Node.js and npm (for frontend)
 - Python 3.x and pip (for backend)
 
-Optional: [SearXNG](https://docs.searxng.org/) for the WebSearch tool (configure URL in session settings).
+Optional: [SearXNG](https://docs.searxng.org/) for the WebSearch tool (configure URL in session settings). If SearXNG returns 403, the app falls back to DuckDuckGo automatically. To fix SearXNG 403: add `json` to `search.formats` in your SearXNG `settings.yml`:
+
+```yaml
+search:
+  formats:
+    - html
+    - json   # required for API access
+```
 
 ### Quick start
 
