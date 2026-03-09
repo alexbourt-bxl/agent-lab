@@ -1,27 +1,14 @@
 import asyncio
-import json
-from pathlib import Path
 import time
 from typing import Any
 
 from agent import Agent
 
-
-DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
-
-
-def _debug_log(hypothesis_id: str, message: str, data: dict[str, object]) -> None:
-    payload = {
-        "sessionId": "ecf5ab",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": "backend/runtime.py",
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    with DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
-        log_file.write(json.dumps(payload) + "\n")
+from turn_schema import (
+    build_handoff_record as build_typed_handoff,
+    infer_handoff_type,
+    TURN_STATUS_APPROVED,
+)
 
 
 class WorkflowRunner:
@@ -102,6 +89,7 @@ class WorkflowRunner:
                     round_number=round_number,
                     max_rounds=self.max_rounds,
                     available_agents=self.agent_order,
+                    cancel_event=stop_event,
                 ),
             )
             cancel_task = asyncio.create_task(stop_event.wait())
@@ -188,6 +176,12 @@ class WorkflowRunner:
                 next_agent = self.agents[next_agent_name]
                 next_agent.receive_handoff(handoff_record)
 
+                await emit_event(
+                    event_type="handoff",
+                    message=f"Handoff: {current_agent.name} → {next_agent_name}",
+                    state="handoff",
+                    round_number=round_number,
+                )
                 await emit_agent_event(
                     agent_name=current_agent.name,
                     event_type="state",
@@ -263,25 +257,43 @@ class WorkflowRunner:
     ) -> dict[str, Any]:
         thought = str(turn_result.get("thought", ""))
         tool_result = turn_result.get("tool_result")
+        status = str(turn_result.get("status", "continue"))
+        feedback = turn_result.get("feedback") or []
+        message = str(turn_result.get("message", ""))
+        source_agent = self.agents[source_agent_name]
+        output = source_agent.output
 
-        return {
-            "fromAgent": source_agent_name,
-            "toAgent": target_agent_name,
-            "summary": thought,
-            "toolResult": tool_result,
-            "output": self.agents[source_agent_name].output,
-            "round": round_number,
-        }
+        handoff_type = infer_handoff_type(
+            agent_role=source_agent.role,
+            status=status,
+            has_critique=len(feedback) > 0,
+        )
+
+        content = message or thought
+
+        return build_typed_handoff(
+            from_agent=source_agent_name,
+            to_agent=target_agent_name,
+            handoff_type=handoff_type,
+            content=content,
+            output=output,
+            summary=thought,
+            tool_result=tool_result,
+            round_number=round_number,
+            required_changes=feedback if feedback else None,
+            accepted_constraints=None,
+        )
 
     def _format_handoff_event_message(self, handoff_record: dict[str, Any]) -> str:
         from_agent = str(handoff_record.get("fromAgent", "Unknown"))
         summary = str(handoff_record.get("summary", ""))
         tool_result = handoff_record.get("toolResult")
+        required_changes = handoff_record.get("requiredChanges", [])
 
+        parts = [f"Received handoff from {from_agent}: {summary}"]
+        if required_changes:
+            parts.append("Required changes: " + "; ".join(required_changes))
         if isinstance(tool_result, str) and tool_result != "":
-            return (
-                f"Received handoff from {from_agent}: "
-                f"{summary} | Tool result: {tool_result}"
-            )
+            parts.append(f"Tool result: {tool_result[:200]}...")
 
-        return f"Received handoff from {from_agent}: {summary}"
+        return " | ".join(parts)

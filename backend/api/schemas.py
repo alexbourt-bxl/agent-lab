@@ -6,7 +6,6 @@ from pydantic import BaseModel
 class RunRequest(BaseModel):
     code: str
     sessionId: str
-    maxRounds: int | None = 8
 
 
 class StopRequest(BaseModel):

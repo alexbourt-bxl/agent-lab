@@ -1,14 +1,25 @@
+import asyncio
 import json
 import re
+import time
 from typing import Any
 
-from llm import OllamaInterface
+from llm import get_llm_client
+
 from tool import Tool
 from tools import (
     ReadFile,
     WriteFile,
     set_workflow_context,
 )
+from turn_schema import (
+    TURN_STATUS_APPROVED,
+    TURN_STATUS_FINAL,
+    normalize_turn_result,
+)
+
+
+MAX_TOOL_SUBTURNS = 3
 
 
 def _default_tools() -> list:
@@ -25,7 +36,7 @@ class Agent:
         output: str = "",
         output_file: str = "{round}.md",
         input_source: str | None = None,
-        llm: OllamaInterface | None = None,
+        llm: Any = None,
         tools: list | None = None,
     ) -> None:
         self.name = name
@@ -37,7 +48,7 @@ class Agent:
         self.input_source = input_source
         self.memory: list[str] = []
         self.inbox: list[dict[str, Any]] = []
-        self.llm = llm or OllamaInterface()
+        self.llm = llm or get_llm_client()
         self.tools: dict[str, Any] = {}
         for tool in tools if tools else _default_tools():
             t = tool() if callable(tool) and not hasattr(tool, "name") else tool
@@ -45,6 +56,75 @@ class Agent:
 
     def add_to_memory(self, info: str) -> None:
         self.memory.append(info)
+
+    async def _generate_with_progress(
+        self,
+        prompt: str,
+        model: str | None,
+        system: str | None,
+        round_number: int,
+        cancel_event: asyncio.Event | None,
+    ) -> str:
+        from events import emit_agent_event
+
+        emit_interval = 0.05
+        if hasattr(self.llm, "generate_stream"):
+            accumulated: list[str] = []
+            last_emit = time.monotonic()
+            try:
+                async for chunk in self.llm.generate_stream(
+                    prompt=prompt,
+                    model=model,
+                    system=system,
+                ):
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise asyncio.CancelledError()
+                    accumulated.append(chunk)
+                    now = time.monotonic()
+                    if now - last_emit >= emit_interval:
+                        text = "".join(accumulated)
+                        await emit_agent_event(
+                            agent_name=self.name,
+                            event_type="thought",
+                            state="thinking",
+                            message=text,
+                            round_number=round_number,
+                        )
+                        last_emit = now
+                return "".join(accumulated)
+            except asyncio.CancelledError:
+                raise
+        if cancel_event is not None:
+            gen_task = asyncio.create_task(
+                self.llm.generate(
+                    prompt=prompt,
+                    model=model,
+                    system=system,
+                ),
+            )
+            cancel_task = asyncio.create_task(cancel_event.wait())
+            done, pending = await asyncio.wait(
+                [gen_task, cancel_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancel_task in done:
+                gen_task.cancel()
+                try:
+                    await gen_task
+                except asyncio.CancelledError:
+                    pass
+                raise asyncio.CancelledError()
+            cancel_task.cancel()
+            try:
+                await cancel_task
+            except asyncio.CancelledError:
+                pass
+            return await gen_task
+        return await self.llm.generate(
+            prompt=prompt,
+            model=model,
+            system=system,
+        )
 
     def register_tool(self, tool: Tool) -> None:
         self.tools[tool.name] = tool
@@ -74,9 +154,9 @@ class Agent:
         round_number: int = 1,
         max_rounds: int = 5,
         available_agents: list[str] | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         from events import emit_agent_event
-        from runtime import _debug_log
 
         self._ingest_handoffs()
 
@@ -84,93 +164,107 @@ class Agent:
             agent_name=self.name,
             event_type="state",
             state="working",
-            message=f"Working...",
+            message="Working...",
             round_number=round_number,
         )
 
-        # region agent log
-        _debug_log(
-            "H5",
-            "execute_turn_start",
-            {
-                "agentName": self.name,
-                "roundNumber": round_number,
-                "inputSource": self.input_source,
-                "hasInput": self.input is not None and self.input != "",
-                "memorySize": len(self.memory),
-            },
-        )
-        # endregion
-        prompt = self._build_prompt(
-            available_agents=available_agents or
-            [
-                self.name,
-            ]
-        )
-        system = (
-            f"You are {self.name}. {self.role}"
-            if self.role
-            else None
-        )
-        raw_output = await self.llm.generate(
-            prompt=prompt,
-            model=model,
-            system=system,
-        )
-        structured_output = self._extract_structured_output(raw_output)
-        thought = self._extract_thought(raw_output, structured_output)
+        agent_list = available_agents or [self.name]
+        tool_result_context: list[str] = []
+        last_thought = ""
+        last_tool_result: str | None = None
+        turn_result: dict[str, Any] = {
+            "status": "continue",
+            "message": "",
+            "feedback": [],
+            "tool_call": None,
+            "next_agent": None,
+            "thought": "",
+            "tool_result": None,
+            "done": False,
+        }
 
-        self.add_to_memory(f"Round {round_number}: {thought}")
-        await emit_agent_event(
-            agent_name=self.name,
-            event_type="thought",
-            state="working",
-            message=thought,
-            round_number=round_number,
-        )
-
-        tool_result = await self._execute_tool_call(
-            structured_output=structured_output,
-            round_number=round_number,
-        )
-        if tool_result is not None:
-            self.add_to_memory(f"Tool result: {tool_result}")
+        for sub_turn in range(MAX_TOOL_SUBTURNS):
+            prompt = self._build_prompt(
+                available_agents=agent_list,
+                tool_result_context=tool_result_context,
+                search_retries_remaining=MAX_TOOL_SUBTURNS - sub_turn - 1,
+                round_number=round_number,
+                max_rounds=max_rounds,
+            )
+            system = self._build_system_prompt()
             await emit_agent_event(
                 agent_name=self.name,
-                event_type="tool_result",
+                event_type="state",
+                state="thinking",
+                message="Thinking...",
+                round_number=round_number,
+            )
+            raw_output = await self._generate_with_progress(
+                prompt=prompt,
+                model=model,
+                system=system,
+                round_number=round_number,
+                cancel_event=cancel_event,
+            )
+            structured_output = self._extract_structured_output(raw_output)
+            turn_result = normalize_turn_result(
+                structured_output if structured_output else {"thought": raw_output}
+            )
+            thought = turn_result["thought"] or self._extract_thought(
+                raw_output, structured_output
+            )
+            last_thought = thought
+
+            self.add_to_memory(f"Round {round_number}: {thought}")
+            await emit_agent_event(
+                agent_name=self.name,
+                event_type="thought",
                 state="working",
-                message=tool_result,
+                message=thought,
                 round_number=round_number,
             )
 
-        self.output = self._build_output_value(thought=thought, tool_result=tool_result)
-        # region agent log
-        _debug_log(
-            "H6",
-            "agent_output_built",
-            {
-                "agentName": self.name,
-                "roundNumber": round_number,
-                "outputSource": (
-                    "tool_result"
-                    if isinstance(tool_result, str) and tool_result != ""
-                    else "thought"
-                ),
-                "outputPreview": self.output[:220],
-                "toolResultPreview": tool_result[:220] if isinstance(tool_result, str) else None,
-                "thoughtPreview": thought[:220],
-            },
+            tool_call = turn_result.get("tool_call")
+            if tool_call is None:
+                break
+
+            tool_result = await self._execute_tool_call_from_dict(
+                tool_call=tool_call,
+                round_number=round_number,
+            )
+            if tool_result is not None:
+                last_tool_result = tool_result
+                self.add_to_memory(f"Tool result: {tool_result}")
+                tool_result_context.append(
+                    f"Tool result from {tool_call.get('tool', 'tool')}:\n{tool_result}"
+                )
+                await emit_agent_event(
+                    agent_name=self.name,
+                    event_type="tool_result",
+                    state="working",
+                    message=tool_result,
+                    round_number=round_number,
+                )
+
+        self.output = self._build_output_value(
+            thought=last_thought, tool_result=last_tool_result
         )
-        # endregion
+
+        done = turn_result.get("done", False)
+        if not done and turn_result.get("status") in (
+            TURN_STATUS_APPROVED,
+            TURN_STATUS_FINAL,
+        ):
+            done = True
 
         return {
-            "done": self._should_stop(
-                raw_output=raw_output,
-                structured_output=structured_output,
-            ),
-            "next_agent": self._extract_next_agent(structured_output),
-            "thought": thought,
-            "tool_result": tool_result,
+            "done": done,
+            "next_agent": turn_result.get("next_agent"),
+            "thought": last_thought,
+            "tool_result": last_tool_result,
+            "status": turn_result.get("status", "continue"),
+            "message": turn_result.get("message", ""),
+            "feedback": turn_result.get("feedback", []),
         }
 
     def _summarize_memory(self) -> str:
@@ -200,26 +294,6 @@ class Agent:
             if isinstance(output_value, str) and output_value != "":
                 self.input = output_value
 
-            # region agent log
-            from runtime import _debug_log
-
-            _debug_log(
-                "H7",
-                "handoff_ingested",
-                {
-                    "agentName": self.name,
-                    "fromAgent": str(handoff_record.get("fromAgent", "")),
-                    "summaryPreview": str(handoff_record.get("summary", ""))[:220],
-                    "toolResultPreview": (
-                        str(handoff_record.get("toolResult", ""))[:220]
-                        if handoff_record.get("toolResult") is not None
-                        else None
-                    ),
-                    "outputPreview": str(handoff_record.get("output", ""))[:220],
-                    "assignedInputPreview": self.input[:220] if isinstance(self.input, str) else None,
-                },
-            )
-            # endregion
             self.add_to_memory(self._format_handoff_record(handoff_record))
 
         self.inbox.clear()
@@ -227,51 +301,126 @@ class Agent:
     def _format_handoff_record(self, handoff_record: dict[str, Any]) -> str:
         from_agent = str(handoff_record.get("fromAgent", "Unknown"))
         summary = str(handoff_record.get("summary", ""))
+        handoff_type = str(handoff_record.get("handoffType", "proposal"))
+        required_changes = handoff_record.get("requiredChanges", [])
         tool_result = handoff_record.get("toolResult")
 
+        parts = [f"Handoff from {from_agent} ({handoff_type}): {summary}"]
+        if required_changes:
+            parts.append("Required changes: " + "; ".join(required_changes))
         if isinstance(tool_result, str) and tool_result != "":
-            return (
-                f"Handoff from {from_agent}: "
-                f"{summary} | Tool result: {tool_result}"
+            parts.append(f"Tool result: {tool_result}")
+
+        return " | ".join(parts)
+
+    def _build_system_prompt(self) -> str:
+        """Build stable system instructions: identity, contract, tool rules, non-hallucination."""
+        parts = [
+            f"You are {self.name}.",
+            "",
+        ]
+        if self.role:
+            parts.extend(
+                [
+                    f"Role: {self.role}",
+                    "",
+                ]
             )
+        parts.extend(
+            [
+                "Output contract: Respond with a JSON block inside ```json fences. "
+                "Include thought, status, and optionally tool, arguments, next_agent, done.",
+                "Valid status: continue, revise, approved, final.",
+                "",
+                "Tool-calling: Request tools explicitly via tool and arguments when needed. "
+                "Do not assume tool results; wait for the backend to return them.",
+                "",
+                "Non-hallucination: Do not invent external facts. "
+                "If you need current information, use the web_search_tool. "
+                "Use only evidence from tools or handoffs.",
+                "",
+            ]
+        )
+        return "\n".join(parts)
 
-        return f"Handoff from {from_agent}: {summary}"
-
-    def _build_prompt(self, available_agents: list[str]) -> str:
+    def _build_prompt(
+        self,
+        available_agents: list[str],
+        tool_result_context: list[str] | None = None,
+        search_retries_remaining: int = 2,
+        round_number: int = 1,
+        max_rounds: int = 5,
+    ) -> str:
         teammate_names = [name for name in available_agents if name != self.name]
         teammate_summary = ", ".join(teammate_names) if teammate_names else "None"
 
-        return (
-            f"Agent name: {self.name}\n"
-            f"Task: {self.task}\n"
-            f"Current input: {self.input if self.input else 'None'}\n"
-            f"Current memory summary: {self._summarize_memory()}\n"
-            f"Available tools:\n{self._format_tools_for_prompt()}\n"
-            f"Other agents in the workflow: {teammate_summary}\n"
-            "Decide the next best action for this agent.\n"
-            "If your role is to review, critique, or analyze another agent's output, identify faults clearly and hand the work back until you are satisfied.\n"
-            "Only set done to true when your own task is fully satisfied. If another agent still needs to revise work, keep done false.\n"
-            "Use the available tools when they help complete the task.\n"
-            "If the task involves creating a file, use write_file_tool and prefer markdown filenames. Relative filenames are written into the session directory.\n"
-            "Always write your final deliverable to the session folder (e.g. output.md, refined_idea.md) before setting done to true, so the output is visible in the UI.\n"
-            "Prefer responding with a JSON block inside ```json fences using this shape:\n"
-            "```json\n"
-            "{\n"
-            '  "thought": "Short reasoning about the next step.",\n'
-            '  "tool": "write_file_tool",\n'
-            '  "arguments": {\n'
-            '    "filename": "hello_world.md",\n'
-            '    "content": "# Hello\\n\\nHello, world!\\n"\n'
-            "  },\n"
-            '  "next_agent": "Analyst",\n'
-            '  "done": false\n'
-            "}\n"
-            "```\n"
-            "Use next_agent only if another agent should act after you.\n"
-            "In multi-agent review workflows, the reviewing agent should usually be the one to set done to true after approval.\n"
-            "If no tool is needed, you may omit tool and arguments.\n"
-            "If you do not use JSON, include STOP when the task is complete."
+        parts = [
+            "## Workflow state\n",
+            f"Round: {round_number} of {max_rounds}\n",
+            f"Other agents: {teammate_summary}\n",
+            "",
+            "## Task and input\n",
+            f"Task: {self.task}\n",
+            f"Current input: {self.input if self.input else 'None'}\n",
+            "",
+            "## Handoff context\n",
+            f"{self._summarize_memory()}\n",
+            "",
+            "## Available tools\n",
+            f"{self._format_tools_for_prompt()}\n",
+            "",
+        ]
+
+        if tool_result_context:
+            parts.extend(
+                [
+                    "## Tool results from this turn\n",
+                    "Use this evidence. Do not invent. Cite or refer to findings.\n",
+                    "",
+                ]
+            )
+            for block in tool_result_context:
+                parts.append(block)
+                parts.append("\n\n")
+            parts.append(
+                "Continue from the evidence above. If you need another search with a "
+                "different query, request it. Otherwise produce your response.\n"
+            )
+            if search_retries_remaining <= 0:
+                parts.append(
+                    "Search retry budget exhausted. Proceed with the evidence you "
+                    "have, or state uncertainty clearly.\n"
+                )
+            parts.append("\n")
+
+        parts.extend(
+            [
+                "## Workflow policy\n",
+                "If your role is to review or critique, identify faults clearly and "
+                "hand work back until satisfied. Only the reviewing agent should set "
+                "done to true after approval.\n",
+                "If the task involves creating a file, use write_file_tool. "
+                "Write final deliverable to session folder (e.g. output.md) before "
+                "setting done to true.\n",
+                "",
+                "## Response format\n",
+                "Respond with JSON inside ```json fences:\n",
+                "```json\n",
+                "{\n",
+                '  "thought": "Short reasoning.",\n',
+                '  "status": "continue",\n',
+                '  "tool": "web_search_tool",\n',
+                '  "arguments": {"query": "your search query"},\n',
+                '  "next_agent": "Analyst",\n',
+                '  "done": false\n',
+                "}\n",
+                "```\n",
+                "Omit tool and arguments if no tool needed. "
+                "Use next_agent only when another agent should act next.\n",
+            ]
         )
+
+        return "".join(parts)
 
     def _extract_structured_output(self, output: str) -> dict[str, Any] | None:
         match = re.search(r"```json\s*(\{.*?\})\s*```", output, re.DOTALL)
@@ -326,19 +475,21 @@ class Agent:
             "arguments": arguments,
         }
 
-    async def _execute_tool_call(
+    async def _execute_tool_call_from_dict(
         self,
-        structured_output: dict[str, Any] | None,
+        tool_call: dict[str, Any],
         round_number: int,
     ) -> str | None:
         from events import emit_agent_event
 
-        tool_call = self._extract_tool_call(structured_output)
-        if tool_call is None:
+        tool_name = tool_call.get("tool")
+        arguments = tool_call.get("arguments", {})
+
+        if not isinstance(tool_name, str):
             return None
 
-        tool_name = tool_call["tool"]
-        arguments = tool_call["arguments"]
+        if not isinstance(arguments, dict):
+            arguments = {}
 
         tool = self.tools.get(tool_name)
         if tool is None or tool.handler is None:

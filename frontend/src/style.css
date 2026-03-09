@@ -20,10 +20,30 @@
   --color-accent-blue: #60a5fa;
   --color-accent-yellow: #facc15;
   --color-accent-green: #4ade80;
+  --color-accent-green-hover: #22c55e;
+  --color-accent-green-border: rgba(34, 197, 94, 0.5);
   --color-accent-red: #f87171;
   --color-overlay: rgba(255, 255, 255, 0.15);
   --color-overlay-strong: rgba(255, 255, 255, 0.2);
   --color-shadow: rgba(0, 0, 0, 0.3);
+  /* Accent orange (Run button, agent header, active agent tab) */
+  --color-accent-orange: #f97316;
+  --color-accent-orange-hover: #ea580c;
+  --color-accent-orange-tab-hover: #fb923c;
+  --color-accent-orange-border: rgba(234, 88, 12, 0.5);
+  --color-on-accent: #fff;
+  /* Status semantic colors (running, done) */
+  --color-status-running: #3b82f6;
+  --color-status-running-bg: rgba(59, 130, 246, 0.15);
+  --color-status-done: #22c55e;
+  --color-status-done-bg: rgba(34, 197, 94, 0.15);
+  /* Badge progress (blue tint) */
+  --color-badge-progress: rgba(0, 128, 255, 0.3);
+  /* Agent header overlays on orange */
+  --color-on-accent-muted: rgba(255, 255, 255, 0.95);
+  --color-on-accent-overlay-weak: rgba(255, 255, 255, 0.1);
+  --color-on-accent-overlay-mid: rgba(255, 255, 255, 0.35);
+  --color-on-accent-overlay-strong: rgba(255, 255, 255, 0.6);
 }
 
 [data-theme="light"]
@@ -46,10 +66,26 @@
   --color-accent-blue: #2563eb;
   --color-accent-yellow: #ca8a04;
   --color-accent-green: #16a34a;
+  --color-accent-green-hover: #15803d;
+  --color-accent-green-border: rgba(21, 128, 61, 0.5);
   --color-accent-red: #dc2626;
   --color-overlay: rgba(0, 0, 0, 0.08);
   --color-overlay-strong: rgba(0, 0, 0, 0.15);
   --color-shadow: rgba(0, 0, 0, 0.1);
+  --color-accent-orange: #f97316;
+  --color-accent-orange-hover: #ea580c;
+  --color-accent-orange-tab-hover: #ea580c;
+  --color-accent-orange-border: rgba(234, 88, 12, 0.5);
+  --color-on-accent: #fff;
+  --color-status-running: #3b82f6;
+  --color-status-running-bg: rgba(59, 130, 246, 0.15);
+  --color-status-done: #22c55e;
+  --color-status-done-bg: rgba(34, 197, 94, 0.15);
+  --color-badge-progress: rgba(0, 128, 255, 0.3);
+  --color-on-accent-muted: rgba(255, 255, 255, 0.95);
+  --color-on-accent-overlay-weak: rgba(255, 255, 255, 0.1);
+  --color-on-accent-overlay-mid: rgba(255, 255, 255, 0.35);
+  --color-on-accent-overlay-strong: rgba(255, 255, 255, 0.6);
 }
 
 :root
@@ -63,6 +99,39 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Spacing */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-resize-gap: 4px;
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
+  --radius-full: 999px;
+  /* Typography */
+  --font-size-xs: 0.8rem;
+  --font-size-sm: 0.9rem;
+  --font-size-base: 0.95rem;
+  --font-size-lg: 1.5rem;
+  --font-size-monospace: 0.9rem;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  /* Motion */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.2s ease;
+  --animation-spin-duration: 0.8s;
+  /* Layout */
+  --breakpoint-md: 900px;
+  --z-dropdown: 100;
+  --size-resize-handle: 8px;
 }
 
 *
@@ -86,13 +155,13 @@ body
 
 button
 {
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   padding: 0.7rem 1rem;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
 button:focus,

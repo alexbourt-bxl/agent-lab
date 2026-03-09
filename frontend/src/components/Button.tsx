@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import styles from './Button.module.css';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'run' | 'clearLogs';
+export type ButtonVariant = 'primary' | 'secondary' | 'run' | 'runActive' | 'clearLogs';
 
 type ButtonProps =
 {
@@ -32,6 +32,7 @@ function Button(
     primary: styles.buttonPrimary,
     secondary: styles.buttonSecondary,
     run: styles.buttonRun,
+    runActive: styles.buttonRunActive,
     clearLogs: styles.buttonClearLogs,
   }[variant];
 

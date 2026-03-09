@@ -32,12 +32,16 @@ import {
   agentNameToKebab,
   buildDefaultCode,
   DEFAULT_CODE,
+  deserializeWorkflowFromJson,
   extractAgentClassCode,
   extractWorkflowCode,
   getAgentDisplayNameFromFileContent,
+  getEffectiveMaxRounds,
   parseAgentConfigsFromCode,
   removeAgentFromCode,
+  serializeWorkflowToJson,
 } from './workflowCode';
+import type { WorkflowJson } from './workflowCode';
 import styles from './App.module.css';
 
 type LogEntry =
@@ -105,31 +109,6 @@ function getCurrentPathname(): string
   return window.location.pathname;
 }
 
-function debugLog(hypothesisId: string, message: string, data: Record<string, unknown>): void
-{
-  // #region agent log
-  fetch('http://127.0.0.1:7841/ingest/7bddab68-8e02-4480-82d9-70b8500c49f1',
-  {
-    method: 'POST',
-    headers:
-    {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': 'ecf5ab',
-    },
-    body: JSON.stringify(
-    {
-      sessionId: 'ecf5ab',
-      runId: 'pre-fix',
-      hypothesisId,
-      location: 'frontend/src/App.tsx',
-      message,
-      data,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-}
-
 function App()
 {
   const contentAreaRef = useRef<HTMLDivElement | null>(null);
@@ -143,11 +122,14 @@ function App()
   const [agentOutputsByRound, setAgentOutputsByRound] = useState<Record<string, Record<number, string>>>({});
   const [agentRounds, setAgentRounds] = useState<Record<string, number[]>>({});
   const [workflowResult, setWorkflowResult] = useState<string | null>(null);
+  const [currentAgent, setCurrentAgent] = useState<string | null>(null);
+  const [currentRound, setCurrentRound] = useState<number>(0);
+  const [workflowStatus, setWorkflowStatus] = useState<string>('idle');
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(readStoredSessionId);
   const [editorActiveTab, setEditorActiveTab] = useState('workflow');
   const [isRunning, setIsRunning] = useState(false);
   const [, setTick] = useState(0);
-  const [maxRounds, setMaxRounds] = useState(8);
+  const maxRounds = getEffectiveMaxRounds(code);
   const [logHeightPercent, setLogHeightPercent] = useState(() => readPercentageCookie(LOG_HEIGHT_COOKIE_NAME, 28, 18, 55));
   const abortControllerRef = useRef<AbortController | null>(null);
   const workflowStartTimeRef = useRef<number | null>(null);
@@ -172,6 +154,9 @@ function App()
     setAgentOutputsByRound({});
     setAgentRounds({});
     setWorkflowResult(null);
+    setCurrentAgent(null);
+    setCurrentRound(0);
+    setWorkflowStatus('idle');
     workflowStartTimeRef.current = null;
   };
 
@@ -183,8 +168,12 @@ function App()
     return response.data.content;
   };
 
-  const loadSession = async (sessionId: string) =>
+  const loadSession = async (
+    sessionId: string,
+    options?: { restoreWorkflowResult?: boolean },
+  ) =>
   {
+    const restoreWorkflowResult = options?.restoreWorkflowResult ?? true;
     try
     {
       const response = await axios.get<WorkflowSessionSnapshot>(
@@ -269,16 +258,23 @@ function App()
 
       const nextAgentOutputs = lastOutputs;
 
-      let nextWorkflowResult = snapshot.workflowResult ?? null;
-      if (typeof snapshot.workflowResultFile === 'string' && snapshot.workflowResultFile !== '')
+      let nextWorkflowResult: string | null = null;
+      if (restoreWorkflowResult)
       {
-        try
+        nextWorkflowResult = snapshot.workflowResult ?? null;
+        if (typeof snapshot.workflowResultFile === 'string' && snapshot.workflowResultFile !== '')
         {
-          nextWorkflowResult = await loadResultContent(snapshot.sessionId, snapshot.workflowResultFile);
-        }
-        catch
-        {
-          nextWorkflowResult = snapshot.workflowResult ?? null;
+          try
+          {
+            nextWorkflowResult = await loadResultContent(
+              snapshot.sessionId,
+              snapshot.workflowResultFile,
+            );
+          }
+          catch
+          {
+            nextWorkflowResult = snapshot.workflowResult ?? null;
+          }
         }
       }
 
@@ -288,6 +284,9 @@ function App()
       setAgentOutputsByRound(outputsByRound);
       setAgentRounds(roundsByAgent);
       setWorkflowResult(nextWorkflowResult);
+      setCurrentAgent(snapshot.currentAgent ?? null);
+      setCurrentRound(snapshot.currentRound ?? 0);
+      setWorkflowStatus(snapshot.status ?? 'idle');
 
       const parsedStartedAt =
         typeof snapshot.startedAt === 'string'
@@ -459,12 +458,27 @@ function App()
 
   useEffect(() =>
   {
+    const storedId = readStoredSessionId();
+    if (storedId === null)
+    {
+      fetch('/default_workflow.json')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json: WorkflowJson | null) =>
+        {
+          if (json?.agents?.length)
+          {
+            setCode(deserializeWorkflowFromJson(json));
+          }
+        })
+        .catch(() => {});
+    }
+
     const ensureSession = async () =>
     {
       const storedId = readStoredSessionId();
       if (storedId !== null)
       {
-        await loadSession(storedId);
+        await loadSession(storedId, { restoreWorkflowResult: false });
         if (currentSessionIdRef.current === storedId)
         {
           return;
@@ -478,7 +492,7 @@ function App()
         if (typeof newId === 'string' && newId !== '')
         {
           persistCurrentSessionId(newId);
-          await loadSession(newId);
+          await loadSession(newId, { restoreWorkflowResult: false });
         }
       }
       catch
@@ -504,6 +518,27 @@ function App()
       }
     };
   }, []);
+
+  const handleLoad = (json: WorkflowJson) =>
+  {
+    if (isRunning)
+    {
+      void handleStopWorkflow();
+    }
+    setCode(deserializeWorkflowFromJson(json));
+  };
+
+  const handleSave = () =>
+  {
+    const json = serializeWorkflowToJson(code);
+    const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'workflow.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleNewSession = async () =>
   {
@@ -552,18 +587,9 @@ function App()
     setLogs([]);
     clearSessionSnapshot();
     setIsRunning(true);
+    workflowStartTimeRef.current = Date.now();
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
-
-    // #region agent log
-    debugLog('F1', 'run_agent_submit_start',
-    {
-      frontendOrigin: window.location.origin,
-      backendUrl: runWorkflowUrl(),
-      codeLength: code.length,
-      online: navigator.onLine,
-    });
-    // #endregion
 
     try
     {
@@ -571,19 +597,10 @@ function App()
       {
         code,
         sessionId: currentSessionId,
-        maxRounds,
       },
       {
         signal,
       });
-
-      // #region agent log
-      debugLog('F1', 'run_agent_submit_success',
-      {
-        status: response.status,
-        data: response.data,
-      });
-      // #endregion
 
       if (typeof response.data.sessionId === 'string' && response.data.sessionId !== '')
       {
@@ -597,31 +614,6 @@ function App()
 
       if (!isAborted)
       {
-        if (axios.isAxiosError(error))
-        {
-          // #region agent log
-          debugLog('F2', 'run_agent_submit_axios_error',
-          {
-            message: error.message,
-            code: error.code,
-            status: error.response?.status,
-            responseData: error.response?.data,
-            hasRequest: error.request !== undefined,
-            backendUrl: runWorkflowUrl(),
-          });
-          // #endregion
-        }
-        else
-        {
-          // #region agent log
-          debugLog('F2', 'run_agent_submit_unknown_error',
-          {
-            error: String(error),
-            backendUrl: runWorkflowUrl(),
-          });
-          // #endregion
-        }
-
         setLogs((currentLogs) => [
           ...currentLogs,
           {
@@ -644,7 +636,7 @@ function App()
   {
     try
     {
-      await axios.post(stopWorkflowUrl());
+      await axios.post(stopWorkflowUrl(), { sessionId: currentSessionId });
     }
     catch
     {
@@ -661,16 +653,6 @@ function App()
     const timeoutId = setTimeout(() =>
     {
       socket = new WebSocket(getWsLogsUrl());
-
-      socket.onopen = () =>
-    {
-      // #region agent log
-      debugLog('F3', 'logs_socket_open',
-      {
-        socketUrl: getWsLogsUrl(),
-      });
-      // #endregion
-    };
 
     socket.onmessage = (event) =>
     {
@@ -716,12 +698,6 @@ function App()
       {
         return;
       }
-      // #region agent log
-      debugLog('F3', 'logs_socket_error',
-      {
-        socketUrl: getWsLogsUrl(),
-      });
-      // #endregion
       setLogs((currentLogs) => [
         ...currentLogs,
         {
@@ -835,6 +811,8 @@ function App()
             theme={theme}
             onThemeToggle={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
             onNew={handleNewSession}
+            onLoad={handleLoad}
+            onSave={handleSave}
             onSettings={() => navigateTo('/settings')}
             onClearLogs={() => setLogs([])}
           />
@@ -847,11 +825,15 @@ function App()
             </Button>
           ) : (
             <Button
-              variant="run"
+              variant={isRunning || hasActiveStep ? 'runActive' : 'run'}
               onClick={isRunning ? handleStopWorkflow : handleRunAgent}
               icon={!isRunning ? <Play size={16} /> : undefined}
-              showSpinner={hasActiveStep}
-              elapsedTime={hasActiveStep ? formatElapsedSeconds(workflowElapsedSeconds) : undefined}
+              showSpinner={isRunning || hasActiveStep}
+              elapsedTime={
+                (isRunning || hasActiveStep)
+                  ? formatElapsedSeconds(workflowElapsedSeconds)
+                  : undefined
+              }
             >
               {isRunning ? 'Stop Workflow' : 'Run Workflow'}
             </Button>
@@ -865,7 +847,7 @@ function App()
         </div>
       ) : (
         <div className={styles.contentArea} ref={contentAreaRef}>
-          <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - 4px)` }}>
+          <div className={styles.mainArea} style={{ height: `calc(${100 - logHeightPercent}% - var(--space-resize-gap))` }}>
             <section className={styles.panel} style={{ flex: 1 }}>
               <EditorPanel
                 theme={theme}
@@ -878,7 +860,9 @@ function App()
                 agentOrder={agentOrder}
                 workflowId={currentSessionId}
                 maxRounds={maxRounds}
-                onMaxRoundsChange={setMaxRounds}
+                currentAgent={currentAgent}
+                currentRound={currentRound}
+                workflowStatus={workflowStatus}
                 workflowResult={workflowResult}
                 activeTab={editorActiveTab}
                 onTabChange={setEditorActiveTab}
@@ -920,7 +904,7 @@ function App()
             aria-orientation="horizontal"
           />
 
-          <section className={`${styles.panel} ${styles.bottomPanel}`} style={{ height: `calc(${logHeightPercent}% - 4px)` }}>
+          <section className={`${styles.panel} ${styles.bottomPanel}`} style={{ height: `calc(${logHeightPercent}% - var(--space-resize-gap))` }}>
             <LogList logs={logs} />
           </section>
         </div>

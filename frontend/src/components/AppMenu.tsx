@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Menu, Sun, Moon } from 'lucide-react';
+import type { WorkflowJson } from '../workflowCode';
 import styles from './AppMenu.module.css';
 
 type AppMenuProps =
@@ -7,6 +8,8 @@ type AppMenuProps =
   theme: 'dark' | 'light';
   onThemeToggle: () => void;
   onNew: () => void;
+  onLoad: (json: WorkflowJson) => void;
+  onSave: () => void;
   onSettings: () => void;
   onClearLogs: () => void;
 };
@@ -16,12 +19,15 @@ function AppMenu(
   theme,
   onThemeToggle,
   onNew,
+  onLoad,
+  onSave,
   onSettings,
   onClearLogs,
 }: AppMenuProps)
 {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() =>
   {
@@ -66,6 +72,42 @@ function AppMenu(
     setOpen(false);
   };
 
+  const handleLoadClick = () =>
+  {
+    fileInputRef.current?.click();
+    setOpen(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+  {
+    const file = e.target.files?.[0];
+    if (!file)
+    {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+    {
+      try
+      {
+        const json = JSON.parse(reader.result as string) as WorkflowJson;
+        onLoad(json);
+      }
+      catch
+      {
+        // Ignore parse errors
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleSave = () =>
+  {
+    onSave();
+    setOpen(false);
+  };
+
   return (
     <div className={styles.container} ref={containerRef}>
       <button
@@ -78,10 +120,24 @@ function AppMenu(
       >
         <Menu size={20} />
       </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+        aria-hidden
+      />
       {open && (
         <div className={styles.dropdown}>
           <button type="button" className={styles.item} onClick={handleNew}>
-            New workflow
+            New
+          </button>
+          <button type="button" className={styles.item} onClick={handleLoadClick}>
+            Load
+          </button>
+          <button type="button" className={styles.item} onClick={handleSave}>
+            Save
           </button>
           <div className={styles.separator} role="separator" />
           <button type="button" className={styles.item} onClick={handleSettings}>

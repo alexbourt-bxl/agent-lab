@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "className": "Researcher",
+      "name": "Researcher",
+      "role": "Market researcher specializing in SaaS and B2B trends.",
+      "tools": ["WebSearch"],
+      "maxRounds": 8
+    },
+    {
+      "className": "Analyst",
+      "name": "Analyst",
+      "role": "Critical analyst who identifies flaws and improvement opportunities.",
+      "tools": [],
+      "maxRounds": 8
+    }
+  ],
+  "instantiations": [
+    {
+      "variable": "researcher",
+      "className": "Researcher",
+      "task": "Find and refine a promising SaaS idea based on analyst feedback",
+      "inputSourceVariable": "analyst"
+    },
+    {
+      "variable": "analyst",
+      "className": "Analyst",
+      "task": "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
+      "inputSourceVariable": "researcher"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ DEFAULT_SETTINGS = {
     "model": "qwen3:4b",
     "timeout": 300.0,
     "llm_server": "http://192.168.129.11:11434",
+    "searxng_url": "http://127.0.0.1:8080",
 }
 
 

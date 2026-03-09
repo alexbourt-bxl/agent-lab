@@ -4,9 +4,10 @@ import uuid
 from typing import Any
 
 from agent import Agent
+
 from agent_parser import extract_agent_configs
 from events import emit_agent_event, emit_event, log_to_client
-from llm import OllamaInterface
+from llm import get_llm_client
 from runtime import WorkflowRunner
 from tools import (
     class_name_to_output_pattern,
@@ -23,7 +24,6 @@ from workflow_state import register_cancel_event, unregister_cancel_event
 async def run_workflow(
     session_id: str,
     code: str,
-    max_rounds: int = 8,
 ) -> dict[str, Any]:
     """
     Run a workflow for the given session and code.
@@ -31,6 +31,8 @@ async def run_workflow(
     {"status": "error", "message": "..."}.
     Caller must clear/set cancel_requested as needed; this function does not touch it.
     """
+    await log_to_client("Setting up workflow...")
+
     from tools import read_workflow_snapshot
 
     snapshot = read_workflow_snapshot(session_id)
@@ -98,18 +100,14 @@ async def run_workflow(
 
     start_agent_name = (
         next(
-            (
-                config["name"]
-                for config in agent_configs
-                if config.get("inputSourceVariable") is None
-            ),
+            (config["name"] for config in agent_configs if config.get("start")),
             None,
         )
         or agent_configs[0]["name"]
     )
 
     session_settings = get_session_settings(session_id)
-    llm_interface = OllamaInterface(settings=session_settings)
+    llm_interface = get_llm_client(settings=session_settings)
     agents = [
         Agent(
             name=str(config["name"]),
@@ -128,6 +126,7 @@ async def run_workflow(
     ]
 
     agent_order = [config["name"] for config in agent_configs]
+    max_rounds = max((c.get("max_rounds", 8) for c in agent_configs), default=8)
     run_id = uuid.uuid4().hex[:6]
     set_workflow_session_id(session_id)
     set_workflow_run_id(run_id)

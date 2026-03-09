@@ -5,3 +5,4 @@ websockets
 httpx
 supabase
 python-dotenv
+beautifulsoup4

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 from tools import (
     get_workflow_run_id,
@@ -31,7 +32,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(payload)
-            except RuntimeError:
+            except (RuntimeError, WebSocketDisconnect, OSError):
                 disconnected_connections.append(connection)
 
         for connection in disconnected_connections:

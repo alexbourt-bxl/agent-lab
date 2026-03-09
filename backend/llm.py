@@ -1,28 +1,31 @@
 import json
-from pathlib import Path
-import sys
-import time
-from typing import Any
+from typing import Any, AsyncIterator, Protocol
 
 import httpx
 from storage import load_settings
 
 
-DEBUG_LOG_PATH = Path(__file__).resolve().parents[1] / "debug-ecf5ab.log"
+class LLMClient(Protocol):
+    """Provider-neutral LLM client interface."""
 
+    async def generate(
+        self,
+        prompt: str,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> str:
+        ...
 
-def _debug_log(hypothesis_id: str, message: str, data: dict[str, object]) -> None:
-    payload = {
-        "sessionId": "ecf5ab",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": "backend/llm.py",
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    with DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
-        log_file.write(json.dumps(payload) + "\n")
+    async def generate_stream(
+        self,
+        prompt: str,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> AsyncIterator[str]:
+        ...
+
+    async def list_models(self) -> list[str]:
+        ...
 
 
 def _normalize_llm_server_url(raw: str) -> str:
@@ -65,35 +68,10 @@ class OllamaInterface:
             payload["system"] = system
 
         try:
-            # region agent log
-            _debug_log(
-                "H2",
-                "ollama_generate_start",
-                {
-                    "baseUrl": self.base_url,
-                    "model": selected_model,
-                    "timeout": self.timeout,
-                    "pythonExecutable": sys.executable,
-                    "promptLength": len(prompt),
-                },
-            )
-            # endregion
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(self.base_url, json=payload)
                 response.raise_for_status()
         except httpx.ReadTimeout as error:
-            # region agent log
-            _debug_log(
-                "H3",
-                "ollama_generate_read_timeout",
-                {
-                    "baseUrl": self.base_url,
-                    "errorType": type(error).__name__,
-                    "error": str(error),
-                    "timeout": self.timeout,
-                },
-            )
-            # endregion
             return f"Error: Ollama timed out after {self.timeout:.0f}s."
         except httpx.RequestError as error:
             # region agent log
@@ -109,32 +87,72 @@ class OllamaInterface:
             # endregion
             return f"Error: Ollama is not reachable. {error!s}"
         except httpx.HTTPStatusError as error:
-            # region agent log
-            _debug_log(
-                "H4",
-                "ollama_generate_http_status_error",
-                {
-                    "baseUrl": self.base_url,
-                    "statusCode": error.response.status_code,
-                    "responseText": error.response.text[:400],
-                },
-            )
-            # endregion
             return f"Error: Ollama returned status {error.response.status_code}."
 
         data = response.json()
-        # region agent log
-        _debug_log(
-            "H4",
-            "ollama_generate_success",
-            {
-                "statusCode": response.status_code,
-                "hasResponseField": "response" in data,
-                "responsePreview": str(data.get("response", ""))[:120],
-            },
-        )
-        # endregion
         return str(data.get("response", ""))
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> AsyncIterator[str]:
+        selected_model = model or self.default_model
+        payload: dict[str, object] = {
+            "model": selected_model,
+            "prompt": prompt,
+            "stream": True,
+        }
+        if system is not None and system != "":
+            payload["system"] = system
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream("POST", self.base_url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                            chunk = data.get("response", "")
+                            if isinstance(chunk, str) and chunk:
+                                yield chunk
+                        except json.JSONDecodeError:
+                            continue
+        except httpx.ReadTimeout:
+            yield f"Error: Ollama timed out after {self.timeout:.0f}s."
+        except httpx.RequestError as error:
+            # region agent log
+            try:
+                from agent_log import _debug_log
+                _debug_log(
+                    "H3",
+                    "ollama_generate_request_error",
+                    {
+                        "baseUrl": self.base_url,
+                        "errorType": type(error).__name__,
+                        "error": str(error),
+                    },
+                )
+            except ImportError:
+                pass
+            # endregion
+            yield f"Error: Ollama is not reachable. {error!s}"
+        except httpx.HTTPStatusError:
+            yield "Error: Ollama returned a non-2xx status."
+
+    async def list_models(self) -> list[str]:
+        return await list_available_ollama_models(self.base_url)
+
+
+def get_llm_client(settings: dict[str, Any] | None = None) -> OllamaInterface:
+    """
+    Return the appropriate LLM client for the given settings.
+    Currently always returns Ollama; extend for other providers later.
+    """
+    return OllamaInterface(settings=settings)
 
 
 def get_ollama_tags_url(base_url: str | None = None) -> str:

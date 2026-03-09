@@ -3,6 +3,8 @@
  * Single source of truth for agent config extraction, code merging, and default code.
  */
 
+const DEFAULT_MAX_ROUNDS = 8;
+
 export type AgentConfig =
 {
   name: string;
@@ -164,20 +166,26 @@ export type AgentCodeConfig =
   className: string;
   displayName: string;
   role: string;
-  tools: string;
+  tools?: string;
   variableName: string;
   task: string;
   input: string;
+  maxRounds?: number;
 };
 
 export function createAgentCode(config: AgentCodeConfig): { classDef: string; instantiation: string }
 {
+  const toolsLine = config.tools != null && config.tools !== '[]'
+    ? `    tools = ${config.tools}\n`
+    : '';
+  const maxRoundsLine = config.maxRounds != null && config.maxRounds !== DEFAULT_MAX_ROUNDS
+    ? `    max_rounds = ${config.maxRounds}\n`
+    : '';
   const classDef = `
 class ${config.className}(Agent):
     name = "${config.displayName}"
     role = "${config.role}"
-    tools = ${config.tools}
-`;
+${toolsLine}${maxRoundsLine}`;
   const instantiation = `${config.variableName} = ${config.className}(\n    task="${config.task}",\n    input=${config.input}\n)`;
   return { classDef, instantiation };
 }
@@ -205,7 +213,6 @@ export function addAgentSkeletonToCode(code: string): { code: string; newAgentNa
     className,
     displayName,
     role: '',
-    tools: '[]',
     variableName,
     task: '...',
     input: '...',
@@ -245,7 +252,7 @@ export function buildDefaultCode(): string
     className: 'Researcher',
     displayName: 'Researcher',
     role: 'Market researcher specializing in SaaS and B2B trends.',
-    tools: '[]',
+    tools: '[WebSearch]',
     variableName: 'researcher',
     task: "Find and refine a promising SaaS idea based on analyst feedback",
     input: 'analyst.output',
@@ -255,7 +262,6 @@ export function buildDefaultCode(): string
     className: 'Analyst',
     displayName: 'Analyst',
     role: "Critical analyst who identifies flaws and improvement opportunities.",
-    tools: '[]',
     variableName: 'analyst',
     task: "Review the researcher's latest SaaS idea and only mark done when the idea is strong enough",
     input: 'researcher.output',
@@ -330,4 +336,170 @@ export function mergeAgentClassCodeIntoFullCode(
     return fullCode;
   }
   return fullCode.replace(pattern, agentCode);
+}
+
+// --- Workflow JSON serialization ---
+
+export type WorkflowAgentJson =
+{
+  className: string;
+  name: string;
+  role: string;
+  tools?: string[];
+  maxRounds?: number;
+};
+
+export type WorkflowInstantiationJson =
+{
+  variable: string;
+  className: string;
+  task: string;
+  inputSourceVariable?: string;
+};
+
+export type WorkflowJson =
+{
+  version: number;
+  agents: WorkflowAgentJson[];
+  instantiations: WorkflowInstantiationJson[];
+};
+
+function extractRoleToolsMaxRoundsFromClassBody(body: string): {
+  role: string;
+  tools: string[];
+  maxRounds: number;
+  toolsInSource: boolean;
+  maxRoundsInSource: boolean;
+}
+{
+  const roleMatch = body.match(/role\s*=\s*["']([^"']*)["']/);
+  const toolsMatch = body.match(/tools\s*=\s*\[([^\]]*)\]/);
+  const maxRoundsMatch = body.match(/max_rounds\s*=\s*(\d+)/);
+  const tools: string[] = [];
+  if (toolsMatch && toolsMatch[1].trim())
+  {
+    tools.push(...toolsMatch[1].split(',').map((t) => t.trim()).filter(Boolean));
+  }
+  return {
+    role: roleMatch ? roleMatch[1] : '',
+    tools,
+    maxRounds: maxRoundsMatch ? parseInt(maxRoundsMatch[1], 10) : DEFAULT_MAX_ROUNDS,
+    toolsInSource: toolsMatch !== null,
+    maxRoundsInSource: maxRoundsMatch !== null,
+  };
+}
+
+function extractTaskAndInputFromInstantiation(code: string, className: string, variable: string): { task: string; inputSourceVariable?: string }
+{
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(
+    `${variable}\\s*=\\s*${escaped}\\s*\\(([^)]*)\\)`,
+    's',
+  );
+  const m = code.match(pattern);
+  if (!m)
+  {
+    return { task: '' };
+  }
+  const args = m[1];
+  const taskMatch = args.match(/task\s*=\s*["']([^"']*)["']/) || args.match(/goal\s*=\s*["']([^"']*)["']/);
+  const inputMatch = args.match(/input\s*=\s*(\w+)\.output/);
+  return {
+    task: taskMatch ? taskMatch[1] : '',
+    inputSourceVariable: inputMatch ? inputMatch[1] : undefined,
+  };
+}
+
+export function serializeWorkflowToJson(code: string): WorkflowJson
+{
+  const configs = parseAgentConfigsFromCode(code);
+  const agents: WorkflowAgentJson[] = [];
+  const instantiations: WorkflowInstantiationJson[] = [];
+
+  for (const config of configs)
+  {
+    const classBody = extractAgentClassCode(code, config.className);
+    const { role, tools, maxRounds, toolsInSource, maxRoundsInSource } =
+      extractRoleToolsMaxRoundsFromClassBody(classBody);
+    const { task, inputSourceVariable } = extractTaskAndInputFromInstantiation(code, config.className, config.variable);
+
+    const agent: WorkflowAgentJson = {
+      className: config.className,
+      name: config.name,
+      role,
+    };
+    if (toolsInSource)
+    {
+      agent.tools = tools;
+    }
+    if (maxRoundsInSource)
+    {
+      agent.maxRounds = maxRounds;
+    }
+    agents.push(agent);
+    instantiations.push({
+      variable: config.variable,
+      className: config.className,
+      task,
+      inputSourceVariable,
+    });
+  }
+
+  return {
+    version: 1,
+    agents,
+    instantiations,
+  };
+}
+
+export function deserializeWorkflowFromJson(json: WorkflowJson): string
+{
+  const classParts: string[] = [];
+  const instParts: string[] = [];
+
+  for (const agent of json.agents)
+  {
+    const inst = json.instantiations.find((x) => x.className === agent.className);
+    if (!inst)
+    {
+      continue;
+    }
+    const toolsLine = agent.tools != null && agent.tools.length > 0
+      ? `    tools = [${agent.tools.join(', ')}]\n`
+      : '';
+    const maxRoundsLine = agent.maxRounds != null && agent.maxRounds !== DEFAULT_MAX_ROUNDS
+      ? `    max_rounds = ${agent.maxRounds}\n`
+      : '';
+    const classDef = `
+class ${agent.className}(Agent):
+    name = "${agent.name}"
+    role = "${agent.role}"
+${toolsLine}${maxRoundsLine}`;
+    const inputArg = inst.inputSourceVariable ? `${inst.inputSourceVariable}.output` : 'None';
+    const instantiation = `${inst.variable} = ${agent.className}(\n    task="${inst.task}",\n    input=${inputArg}\n)`;
+    classParts.push(classDef.trim());
+    instParts.push(instantiation);
+  }
+
+  return classParts.join('\n\n') + '\n\n' + instParts.join('\n\n') + '\n';
+}
+
+export function getEffectiveMaxRounds(code: string): number
+{
+  const configs = parseAgentConfigsFromCode(code);
+  if (configs.length === 0)
+  {
+    return DEFAULT_MAX_ROUNDS;
+  }
+  let max = DEFAULT_MAX_ROUNDS;
+  for (const config of configs)
+  {
+    const classBody = extractAgentClassCode(code, config.className);
+    const { maxRounds } = extractRoleToolsMaxRoundsFromClassBody(classBody);
+    if (maxRounds > max)
+    {
+      max = maxRounds;
+    }
+  }
+  return max;
 }

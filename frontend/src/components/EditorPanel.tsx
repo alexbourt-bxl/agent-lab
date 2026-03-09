@@ -17,7 +17,7 @@ import {
 } from '../workflowCode';
 import styles from './EditorPanel.module.css';
 
-const AVAILABLE_TOOLS = ['ReadFile', 'WriteFile', 'SearchWeb'];
+const AVAILABLE_TOOLS = ['ReadFile', 'WriteFile', 'WebSearch'];
 
 let toolsProviderRegistered = false;
 
@@ -106,7 +106,9 @@ type EditorPanelProps =
   agentOrder: string[];
   workflowId: string | null;
   maxRounds: number;
-  onMaxRoundsChange: (value: number) => void;
+  currentAgent: string | null;
+  currentRound: number;
+  workflowStatus: string;
   workflowResult: string | null;
   activeTab: string;
   onTabChange: (tab: string) => void;
@@ -128,7 +130,9 @@ function EditorPanel(
   agentOrder = [],
   workflowId,
   maxRounds,
-  onMaxRoundsChange,
+  currentAgent = null,
+  currentRound = 0,
+  workflowStatus = 'idle',
   workflowResult,
   activeTab,
   onTabChange,
@@ -202,13 +206,13 @@ function EditorPanel(
         {
           const label = getTabLabel(config);
           const status = agentStatuses[config.name];
-          const isWorking = status?.state === 'thinking' || status?.state === 'working';
+          const isWorking = status?.state === 'thinking' || status?.state === 'working' || status?.state === 'executing';
           return (
             <div
               key={config.name}
               role="tab"
               tabIndex={0}
-              className={activeTab === `agent:${config.name}` ? styles.tabActive : styles.tab}
+              className={`${styles.tab} ${activeTab === `agent:${config.name}` ? styles.tabActive : ''} ${isWorking ? styles.tabActiveAgent : ''}`}
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) =>
               {
@@ -266,20 +270,22 @@ function EditorPanel(
               <span className={styles.workflowId}>
                 ID: {workflowId ?? '—'}
               </span>
-              <label className={styles.maxRoundsLabel}>
-                Max rounds:
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={maxRounds}
-                  onChange={(e) => onMaxRoundsChange(Number(e.target.value) || 8)}
-                  className={styles.maxRoundsInput}
-                />
-              </label>
+              <div className={styles.workflowProgress}>
+                <span className={styles.workflowProgressLabel}>
+                  Round {currentRound} of {maxRounds}
+                </span>
+                {currentAgent != null && (
+                  <span className={styles.workflowProgressAgent}>
+                    Active: {currentAgent}
+                  </span>
+                )}
+                <span className={styles.workflowStatusBadge} data-status={workflowStatus}>
+                  {workflowStatus}
+                </span>
+              </div>
             </div>
             <div className={styles.twoPaneSplit} ref={splitRef}>
-              <div className={styles.codePane} style={{ width: `calc(${codePaneWidthPercent}% - 4px)` }}>
+              <div className={styles.codePane} style={{ width: `calc(${codePaneWidthPercent}% - var(--space-resize-gap))` }}>
                 <div className={styles.editorShell}>
                   <Editor
                     defaultLanguage="python"
@@ -305,7 +311,7 @@ function EditorPanel(
                 aria-label="Resize code and result panes"
                 aria-orientation="vertical"
               />
-              <div className={styles.resultPane} style={{ width: `calc(${100 - codePaneWidthPercent}% - 4px)` }}>
+              <div className={styles.resultPane} style={{ width: `calc(${100 - codePaneWidthPercent}% - var(--space-resize-gap))` }}>
                 <div className={styles.outputContent}>
                   <pre className={styles.outputPre}>{workflowResult ?? 'No workflow result yet.'}</pre>
                 </div>
@@ -327,14 +333,14 @@ function EditorPanel(
                 displayRound != null && outputsForAgent[displayRound] !== undefined
                   ? outputsForAgent[displayRound]
                   : agentOutputs[agentName] ?? 'No output';
-              const isWorking = status?.state === 'thinking' || status?.state === 'working';
+              const isWorking = status?.state === 'thinking' || status?.state === 'working' || status?.state === 'executing';
               const stepElapsedSeconds =
                 isWorking && status?.stepStartTime !== undefined
                   ? Math.floor((Date.now() - status.stepStartTime) / 1000)
                   : undefined;
               return (
                 <>
-                  <div className={styles.agentHeader}>
+                  <div className={`${styles.agentHeader} ${isWorking ? styles.agentHeaderWorking : ''}`}>
                     {stepElapsedSeconds !== undefined && (
                       <span className={styles.agentElapsed}>
                         {formatElapsedSeconds(stepElapsedSeconds)}
@@ -359,7 +365,7 @@ function EditorPanel(
                     )}
                   </div>
             <div className={styles.twoPaneSplit} ref={splitRef}>
-              <div className={styles.codePane} style={{ width: `calc(${codePaneWidthPercent}% - 4px)` }}>
+              <div className={styles.codePane} style={{ width: `calc(${codePaneWidthPercent}% - var(--space-resize-gap))` }}>
                 <div className={styles.editorShell}>
                   <Editor
                     defaultLanguage="python"
@@ -400,7 +406,7 @@ function EditorPanel(
                 aria-label="Resize code and result panes"
                 aria-orientation="vertical"
               />
-              <div className={styles.resultPane} style={{ width: `calc(${100 - codePaneWidthPercent}% - 4px)` }}>
+              <div className={styles.resultPane} style={{ width: `calc(${100 - codePaneWidthPercent}% - var(--space-resize-gap))` }}>
                 <div className={styles.outputContent}>
                   <pre className={styles.outputPre}>
                     {displayOutput}

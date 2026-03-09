@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .read_file import create_read_file
-from .search_web import SearchWeb
+from .search_web import WebSearch
 from .session_files import (
     delete_session_file,
     list_session_files,
@@ -111,11 +111,11 @@ WriteFile = create_write_file(write_file_tool)
 TOOL_NAME_TO_DISPLAY: dict[str, str] = {
     "read_file_tool": "ReadFile",
     "write_file_tool": "WriteFile",
-    "web_search_tool": "SearchWeb",
+    "web_search_tool": "WebSearch",
 }
 
 TOOL_REGISTRY: dict[str, type] = {
     "ReadFile": ReadFile,
     "WriteFile": WriteFile,
-    "SearchWeb": SearchWeb,
+    "WebSearch": WebSearch,
 }

@@ -293,6 +293,7 @@ def update_session_settings(
 DEFAULT_SESSION_CODE = '''class Researcher(Agent):
     name = "Researcher"
     role = "Market researcher specializing in SaaS and B2B trends."
+    tools = [WebSearch]
 
 class Analyst(Agent):
     name = "Analyst"
@@ -300,7 +301,8 @@ class Analyst(Agent):
 
 researcher = Researcher(
     goal="Find and refine a promising SaaS idea based on analyst feedback",
-    input=analyst.output
+    input=analyst.output,
+    start=True
 )
 
 analyst = Analyst(

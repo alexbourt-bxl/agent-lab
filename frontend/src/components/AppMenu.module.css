@@ -12,11 +12,11 @@
   height: 40px;
   padding: 0;
   border: 1px solid var(--color-border-subtle);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background-color: var(--color-bg-surface-subtle);
   color: var(--color-text-muted-strong);
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
 .trigger:hover
@@ -35,30 +35,30 @@
 .dropdown
 {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + var(--space-4));
   left: 0;
   min-width: 160px;
-  padding: 6px 0;
+  padding: var(--space-3) 0;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   background-color: var(--color-bg-surface);
-  box-shadow: 0 4px 12px var(--color-shadow);
-  z-index: 100;
+  box-shadow: 0 var(--space-4) var(--space-5) var(--color-shadow);
+  z-index: var(--z-dropdown);
 }
 
 .item
 {
   display: block;
   width: 100%;
-  padding: 8px 16px;
+  padding: var(--space-4) var(--space-6);
   border: none;
   background: none;
   color: var(--color-text);
-  font-size: 0.95rem;
+  font-size: var(--font-size-base);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--transition-fast);
 }
 
 .item:hover
@@ -70,12 +70,12 @@
 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .separator
 {
   height: 1px;
-  margin: 6px 0;
+  margin: var(--space-3) 0;
   background-color: var(--color-border);
 }

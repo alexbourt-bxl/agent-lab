@@ -2,14 +2,14 @@
 {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  border-radius: 10px;
+  gap: var(--space-3);
+  border-radius: var(--radius-xl);
   padding: 0.7rem 1rem;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
 .button:focus,
@@ -37,8 +37,8 @@
   height: 1rem;
   border: 2px solid currentColor;
   border-right-color: transparent;
-  border-radius: 999px;
-  animation: buttonSpin 0.8s linear infinite;
+  border-radius: var(--radius-full);
+  animation: buttonSpin var(--animation-spin-duration) linear infinite;
 }
 
 @keyframes buttonSpin
@@ -83,21 +83,35 @@
 .buttonRun
 {
   min-width: 120px;
-  border: 1px solid var(--color-border-subtle);
-  background-color: var(--color-bg-surface-elevated);
-  color: var(--color-text-strong);
+  border: 1px solid var(--color-accent-green-border);
+  background-color: var(--color-accent-green);
+  color: var(--color-on-accent);
 }
 
 .buttonRun:hover:not(:disabled)
 {
-  border-color: var(--color-border-hover);
-  background-color: var(--color-bg-surface-hover-strong);
+  border-color: var(--color-accent-green-hover);
+  background-color: var(--color-accent-green-hover);
+}
+
+.buttonRunActive
+{
+  min-width: 120px;
+  border: 1px solid var(--color-accent-orange-border);
+  background-color: var(--color-accent-orange);
+  color: var(--color-on-accent);
+}
+
+.buttonRunActive:hover:not(:disabled)
+{
+  border-color: var(--color-accent-orange-hover);
+  background-color: var(--color-accent-orange-hover);
 }
 
 .buttonClearLogs
 {
-  padding: 0.45rem 0.8rem;
-  font-size: 0.8rem;
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--font-size-xs);
   border: 1px solid var(--color-border-subtle);
   background-color: var(--color-bg-surface-subtle);
   color: var(--color-text-muted-strong);

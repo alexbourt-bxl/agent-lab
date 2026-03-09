@@ -27,6 +27,17 @@ def extract_input_source_variable(arguments: str) -> str | None:
     return match.group("source_variable")
 
 
+def extract_start_argument(arguments: str) -> bool:
+    match = re.search(
+        r'start\s*=\s*(?P<value>True|False|true|false)',
+        arguments,
+    )
+    if match is None:
+        return False
+
+    return match.group("value").lower() == "true"
+
+
 def _extract_class_attrs(
     code: str,
     start: int,
@@ -39,6 +50,7 @@ def _extract_class_attrs(
     name_match = re.search(r'name\s*=\s*["\']([^"\']*)["\']', body)
     role_match = re.search(r'role\s*=\s*["\']([^"\']*)["\']', body)
     tools_match = re.search(r"tools\s*=\s*\[([^\]]+)\]", body)
+    max_rounds_match = re.search(r"max_rounds\s*=\s*(\d+)", body)
     if name_match:
         attrs["name"] = name_match.group(1)
     if role_match:
@@ -54,6 +66,7 @@ def _extract_class_attrs(
         ]
     else:
         attrs["tools"] = []
+    attrs["max_rounds"] = int(max_rounds_match.group(1)) if max_rounds_match else 8
     return attrs
 
 
@@ -77,6 +90,7 @@ def extract_agent_configs(code: str) -> list[dict[str, Any]]:
             "name": attrs.get("name", class_name),
             "role": attrs.get("role", ""),
             "tools": attrs.get("tools", []),
+            "max_rounds": attrs.get("max_rounds", 8),
         }
 
     configs: list[dict[str, Any]] = []
@@ -103,7 +117,9 @@ def extract_agent_configs(code: str) -> list[dict[str, Any]]:
                     "inputSourceVariable": extract_input_source_variable(
                         arguments
                     ),
+                    "start": extract_start_argument(arguments),
                     "tools": classes_by_name[class_name]["tools"],
+                    "max_rounds": classes_by_name[class_name]["max_rounds"],
                 }
             )
             break
