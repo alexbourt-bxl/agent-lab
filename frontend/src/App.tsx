@@ -7,10 +7,16 @@ import {
   getWsLogsUrl,
   runWorkflowUrl,
   sessionFileUrl,
-  sessionFilesUrl,
-  sessionWorkflowUrl,
   stopWorkflowUrl,
 } from './api';
+import {
+  getFileContent,
+  getFiles,
+  getWorkflow,
+  invalidateWorkflow,
+  setInvalidateCallback,
+} from './sessionCache';
+import { supabase } from './supabase';
 import AppMenu from './components/AppMenu';
 import Button from './components/Button';
 import EditorPanel from './components/EditorPanel';
@@ -80,27 +86,6 @@ type SessionAgentSnapshot =
   stepStartedAt?: string | null;
 };
 
-type WorkflowSessionSnapshot =
-{
-  sessionId: string;
-  status: string;
-  settings?: { timeout?: number };
-  agentOrder: string[];
-  currentAgent?: string | null;
-  currentRound?: number;
-  startedAt?: string | null;
-  updatedAt?: string | null;
-  workflowResult?: string | null;
-  workflowResultFile?: string | null;
-  agents: Record<string, SessionAgentSnapshot>;
-};
-
-type SessionResultResponse =
-{
-  filename: string;
-  content: string;
-};
-
 function getCurrentPathname(): string
 {
   if (typeof window === 'undefined')
@@ -144,6 +129,7 @@ function App()
   const sessionLoadGenerationRef = useRef<number>(0);
   const codeRef = useRef<string>(code);
   const lastSyncedCodeRef = useRef<string | null>(null);
+  const createNewSessionRef = useRef<(() => Promise<void>) | null>(null);
 
   const persistCurrentSessionId = (sessionId: string | null) =>
   {
@@ -169,24 +155,29 @@ function App()
 
   const loadResultContent = async (sessionId: string, filename: string): Promise<string> =>
   {
-    const response = await axios.get<SessionResultResponse>(
-      sessionFileUrl(sessionId, filename),
-    );
-    return response.data.content;
+    try
+    {
+      return await getFileContent(sessionId, filename);
+    }
+    catch
+    {
+      return '';
+    }
   };
 
   const loadSession = async (
     sessionId: string,
-    options?: { restoreWorkflowResult?: boolean },
+    options?: { restoreWorkflowResult?: boolean; restoreWorkflowStatus?: boolean; restoreAgentOutputs?: boolean; loadSessionFiles?: boolean },
   ) =>
   {
     const restoreWorkflowResult = options?.restoreWorkflowResult ?? true;
+    const restoreWorkflowStatus = options?.restoreWorkflowStatus ?? true;
+    const restoreAgentOutputs = options?.restoreAgentOutputs ?? true;
+    const loadSessionFiles = options?.loadSessionFiles ?? false;
     const loadId = ++sessionLoadGenerationRef.current;
     try
     {
-      const response = await axios.get<WorkflowSessionSnapshot>(
-        sessionWorkflowUrl(sessionId),
-      );
+      const snapshot = await getWorkflow(sessionId);
       if (sessionLoadGenerationRef.current !== loadId)
       {
         return;
@@ -195,8 +186,11 @@ function App()
       {
         return;
       }
-      const snapshot = response.data;
-      const snapshotAgents = snapshot.agents ?? {};
+      if (snapshot === null)
+      {
+        throw new Error('Session not found');
+      }
+      const snapshotAgents = (snapshot.agents ?? {}) as Record<string, SessionAgentSnapshot>;
       const orderedAgentNames = snapshot.agentOrder ?? [];
       const agentNames = [
         ...orderedAgentNames,
@@ -238,38 +232,58 @@ function App()
         else if (resultFiles.length > 0)
         {
           const parsed = resultFiles
-            .map((f) =>
+            .map((f: string) =>
             {
               const m = f.match(/^[^.]+_(\d+)\.md$/);
               return m ? parseInt(m[1], 10) : null;
             })
             .filter((r): r is number => r !== null);
-          roundsByAgent[agentName] = [...new Set(parsed)].sort((a, b) => a - b);
+          roundsByAgent[agentName] = [...new Set(parsed)].sort((a: number, b: number) => a - b);
         }
       }
 
       const outputsByRound: Record<string, Record<number, string>> = {};
       const lastOutputs: Record<string, string> = {};
-      for (const agentName of agentNames)
+      let nextRoundsByAgent = roundsByAgent;
+      if (restoreAgentOutputs)
       {
-        const rounds = roundsByAgent[agentName] ?? [];
-        outputsByRound[agentName] = {};
-        let lastOutput = '';
-        for (const r of rounds)
+        const loadTasks: Array<{ agentName: string; round: number; filename: string }> = [];
+        for (const agentName of agentNames)
         {
-          const filename = `${agentNameToKebab(agentName)}_${r}.md`;
-          try
+          const rounds = roundsByAgent[agentName] ?? [];
+          outputsByRound[agentName] = {};
+          for (const r of rounds)
           {
-            const content = await loadResultContent(snapshot.sessionId, filename);
-            outputsByRound[agentName][r] = content;
-            lastOutput = content;
-          }
-          catch
-          {
-            outputsByRound[agentName][r] = '';
+            loadTasks.push({
+              agentName,
+              round: r,
+              filename: `${agentNameToKebab(agentName)}_${r}.md`,
+            });
           }
         }
-        lastOutputs[agentName] = lastOutput;
+        const loadResults = await Promise.all(
+          loadTasks.map(({ agentName, round, filename }) =>
+            loadResultContent(snapshot.sessionId, filename)
+              .then((content) => ({ agentName, round, content }))
+              .catch(() => ({ agentName, round, content: '' })),
+          ),
+        );
+        for (const { agentName, round, content } of loadResults)
+        {
+          outputsByRound[agentName][round] = content;
+        }
+        for (const agentName of agentNames)
+        {
+          const rounds = (roundsByAgent[agentName] ?? []).sort((a, b) => a - b);
+          lastOutputs[agentName] =
+            rounds.length > 0
+              ? (outputsByRound[agentName]?.[rounds[rounds.length - 1]] ?? '')
+              : '';
+        }
+      }
+      else
+      {
+        nextRoundsByAgent = {};
       }
 
       const nextAgentOutputs = lastOutputs;
@@ -300,14 +314,16 @@ function App()
       }
 
       setAgentOrder(agentNames);
-      setAgentStatuses(nextAgentStatuses);
+      setAgentStatuses(restoreAgentOutputs ? nextAgentStatuses : Object.fromEntries(
+        agentNames.map((name) => [name, { name, state: 'waiting_for_turn', message: '' }]),
+      ));
       setAgentOutputs(nextAgentOutputs);
       setAgentOutputsByRound(outputsByRound);
-      setAgentRounds(roundsByAgent);
+      setAgentRounds(nextRoundsByAgent);
       setWorkflowResult(nextWorkflowResult);
-      setCurrentAgent(snapshot.currentAgent ?? null);
-      setCurrentRound(snapshot.currentRound ?? 0);
-      setWorkflowStatus(snapshot.status ?? 'idle');
+      setCurrentAgent(restoreAgentOutputs ? (snapshot.currentAgent ?? null) : null);
+      setCurrentRound(restoreAgentOutputs ? snapshot.currentRound ?? 0 : 0);
+      setWorkflowStatus(restoreWorkflowStatus ? (snapshot.status ?? 'idle') : 'idle');
 
       const parsedStartedAt =
         typeof snapshot.startedAt === 'string'
@@ -321,14 +337,12 @@ function App()
       const isNewSession = currentSessionIdRef.current !== snapshot.sessionId;
       persistCurrentSessionId(snapshot.sessionId);
 
-      if (isNewSession)
+      if (isNewSession || loadSessionFiles)
       {
         try
         {
-          const filesRes = await axios.get<{ files: string[] }>(
-            sessionFilesUrl(snapshot.sessionId),
-          );
-          const pyFiles = (filesRes.data.files ?? []).filter(
+          const files = await getFiles(snapshot.sessionId);
+          const pyFiles = files.filter(
             (f) => f.endsWith('.py') && f !== 'workflow.py',
           );
           const [workflowCode, ...agentContents] = await Promise.all([
@@ -419,6 +433,54 @@ function App()
 
   useEffect(() =>
   {
+    setInvalidateCallback((invalidatedSessionId) =>
+    {
+      if (currentSessionIdRef.current === invalidatedSessionId)
+      {
+        void loadSession(invalidatedSessionId);
+      }
+    });
+    return () =>
+    {
+      setInvalidateCallback(null);
+    };
+  }, []);
+
+  useEffect(() =>
+  {
+    const client = supabase;
+    if (!client)
+    {
+      return;
+    }
+    const channel = client
+      .channel('session-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sessions',
+        },
+        (payload) =>
+        {
+          const row = payload.new as Record<string, unknown> | null;
+          const sessionId = row?.session_id;
+          if (typeof sessionId === 'string' && sessionId !== '')
+          {
+            invalidateWorkflow(sessionId);
+          }
+        },
+      )
+      .subscribe();
+    return () =>
+    {
+      client.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() =>
+  {
     document.documentElement.setAttribute('data-theme', theme);
     writeStoredTheme(theme);
   }, [theme]);
@@ -493,7 +555,15 @@ function App()
         {
           lastSyncedCodeRef.current = currentCode;
         })
-        .catch(() => {});
+        .catch((err) =>
+        {
+          if (axios.isAxiosError(err) && err.response?.status === 404)
+          {
+            persistCurrentSessionId(null);
+            clearSessionSnapshot();
+            void createNewSessionRef.current?.();
+          }
+        });
     }, 1000);
 
     return () => window.clearInterval(intervalId);
@@ -516,18 +586,8 @@ function App()
         .catch(() => {});
     }
 
-    const ensureSession = async () =>
+    const doCreateSession = async () =>
     {
-      const storedId = readStoredSessionId();
-      if (storedId !== null)
-      {
-        await loadSession(storedId, { restoreWorkflowResult: false });
-        if (currentSessionIdRef.current === storedId)
-        {
-          return;
-        }
-      }
-
       try
       {
         const createRes = await axios.post<{ sessionId: string }>(createSessionUrl());
@@ -535,7 +595,7 @@ function App()
         if (typeof newId === 'string' && newId !== '')
         {
           persistCurrentSessionId(newId);
-          await loadSession(newId, { restoreWorkflowResult: false });
+          await loadSession(newId, { restoreWorkflowResult: false, restoreWorkflowStatus: false, restoreAgentOutputs: false, loadSessionFiles: true });
         }
       }
       catch
@@ -549,6 +609,23 @@ function App()
           },
         ]);
       }
+    };
+
+    createNewSessionRef.current = doCreateSession;
+
+    const ensureSession = async () =>
+    {
+      const storedId = readStoredSessionId();
+      if (storedId !== null)
+      {
+        await loadSession(storedId, { restoreWorkflowResult: false, restoreWorkflowStatus: false, restoreAgentOutputs: false, loadSessionFiles: true });
+        if (currentSessionIdRef.current === storedId)
+        {
+          return;
+        }
+      }
+
+      await doCreateSession();
     };
 
     void ensureSession();

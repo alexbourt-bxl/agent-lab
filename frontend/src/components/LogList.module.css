@@ -19,7 +19,7 @@
 .logList
 {
   display: grid;
-  grid-template-columns: 140px max-content minmax(0, 1fr);
+  grid-template-columns: var(--size-log-timestamp) max-content minmax(0, 1fr);
   gap: 0 var(--space-5);
   row-gap: var(--space-2);
   font-family: 'Cascadia Code', 'Consolas', monospace;

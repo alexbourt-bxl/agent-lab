@@ -9,10 +9,6 @@ from storage import DEFAULT_SETTINGS
 
 from .code_extraction import _extract_workflow_and_agent_code
 
-
-WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
-SESSIONS_ROOT = WORKSPACE_ROOT / "sessions"
-
 _workflow_session_id: ContextVar[str | None] = ContextVar(
     "workflow_session_id",
     default=None,
@@ -76,13 +72,13 @@ def set_workflow_context(agent_name: str | None, round_number: int | None) -> No
     _workflow_round_number.set(round_number)
 
 
-def _normalize_output_path(target_path: Path) -> Path:
-    if target_path.suffix == "":
-        target_path = target_path.with_suffix(".md")
-    elif target_path.suffix == ".txt":
-        target_path = target_path.with_suffix(".md")
-
-    return target_path
+def _normalize_filename(filename: str) -> str:
+    """Normalize filename to .md extension."""
+    if not filename.endswith(".md") and not filename.endswith(".txt"):
+        return filename if "." in filename else f"{filename}.md"
+    if filename.endswith(".txt"):
+        return filename[:-4] + ".md"
+    return filename
 
 
 def _sanitize_agent_name(agent_name: str) -> str:
@@ -90,15 +86,6 @@ def _sanitize_agent_name(agent_name: str) -> str:
     return sanitized or "agent"
 
 
-def get_session_directory(session_id: str | None = None) -> Path:
-    resolved_session_id = _normalize_session_id(session_id) or get_workflow_session_id()
-    if resolved_session_id is None:
-        return SESSIONS_ROOT
-
-    return SESSIONS_ROOT / resolved_session_id
-
-
-WORKFLOW_STATE_FILENAME = "workflow.json"
 WORKFLOW_CODE_FILENAME = "workflow.py"
 
 
@@ -126,29 +113,6 @@ def kebab_to_class_name(kebab: str) -> str:
     if not kebab:
         return "Agent"
     return "".join(part.capitalize() for part in kebab.split("-"))
-
-
-def get_workflow_state_path(session_id: str | None = None) -> Path:
-    return get_session_directory(session_id) / WORKFLOW_STATE_FILENAME
-
-
-def get_workflow_code_path(session_id: str | None = None) -> Path:
-    return get_session_directory(session_id) / WORKFLOW_CODE_FILENAME
-
-
-def get_agent_code_path(agent_name: str, session_id: str | None = None) -> Path:
-    kebab = _agent_name_to_kebab(agent_name)
-    return get_session_directory(session_id) / f"{kebab}.py"
-
-
-def get_agent_code_path_by_class_name(class_name: str, session_id: str | None = None) -> Path:
-    """Agent files are named by class name (e.g. NewAgent1 -> new-agent-1.py)."""
-    kebab = _agent_name_to_kebab(class_name)
-    return get_session_directory(session_id) / f"{kebab}.py"
-
-
-def get_workflow_file_path(session_id: str | None = None) -> Path:
-    return get_workflow_state_path(session_id)
 
 
 def _default_agent_snapshot(agent_name: str, output_file: str = "{round}.md") -> dict[str, Any]:
@@ -298,6 +262,7 @@ DEFAULT_SESSION_CODE = '''class Researcher(Agent):
 class Analyst(Agent):
     name = "Analyst"
     role = "Critical analyst who identifies flaws and improvement opportunities."
+    tools = [WebSearch]
 
 researcher = Researcher(
     goal="Find and refine a promising SaaS idea based on analyst feedback",
@@ -346,14 +311,17 @@ def _pattern_to_regex(pattern: str) -> str:
 
 
 def _rename_agent_result_files(
-    session_dir: Path,
+    session_id: str,
     old_pattern: str,
     new_pattern: str,
     result_files: list[str],
     last_result_file: str | None,
 ) -> tuple[list[str], str | None]:
-    """Rename result files when output pattern changes. Returns new result_files and lastResultFile."""
+    """Rename result files when output pattern changes. Returns new result_files and lastResultFile.
+    DB stores by (agent_name, round); filenames in snapshot are display metadata. We only update
+    the snapshot's resultFiles/lastResultFile; no DB migration needed."""
     import re
+
     regex = _pattern_to_regex(old_pattern)
     new_result_files: list[str] = []
     new_last: str | None = None
@@ -362,11 +330,6 @@ def _rename_agent_result_files(
         if match:
             round_str = match.group(1)
             new_name = new_pattern.replace("{round}", round_str)
-            old_path = session_dir / old_name
-            new_path = session_dir / new_name
-            if old_path.exists() and old_path != new_path:
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                old_path.rename(new_path)
             new_result_files.append(new_name)
             if old_name == last_result_file:
                 new_last = new_name
@@ -419,7 +382,6 @@ def initialize_workflow_session(
             if isinstance(existing_settings, dict):
                 snapshot["settings"] = existing_settings
 
-    session_dir = get_session_directory(resolved_session_id)
     old_agent_order = existing.get("agentOrder", []) if existing else []
     for i, agent_name in enumerate(agent_order):
         output_file = output_files.get(
@@ -429,7 +391,7 @@ def initialize_workflow_session(
         _ensure_agent_snapshot(snapshot, agent_name)
         snapshot["agents"][agent_name]["outputFile"] = output_file
 
-        if existing is not None and session_dir.exists():
+        if existing is not None:
             old_agent_name = old_agent_order[i] if i < len(old_agent_order) else None
             old_agent = existing.get("agents", {}).get(old_agent_name or agent_name)
             old_pattern = old_agent.get("outputFile", "{round}.md") if isinstance(old_agent, dict) else "{round}.md"
@@ -437,7 +399,7 @@ def initialize_workflow_session(
                 old_result_files = old_agent.get("resultFiles", [])
                 old_last = old_agent.get("lastResultFile")
                 new_result_files, new_last = _rename_agent_result_files(
-                    session_dir,
+                    resolved_session_id,
                     old_pattern,
                     output_file,
                     old_result_files,

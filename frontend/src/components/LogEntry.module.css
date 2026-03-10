@@ -4,8 +4,8 @@
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
   align-items: start;
-  padding: 0px 12px;
-  border-radius: 10px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-xl);
 }
 
 .logEntryThought
@@ -36,7 +36,7 @@
 .logLevel
 {
   color: var(--color-accent-blue);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .logLevelThought

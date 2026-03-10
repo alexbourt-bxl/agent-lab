@@ -8,10 +8,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: var(--size-trigger);
+  height: var(--size-trigger);
   padding: 0;
-  border: 1px solid var(--color-border-subtle);
+  border: var(--border-width) solid var(--color-border-subtle);
   border-radius: var(--radius-xl);
   background-color: var(--color-bg-surface-subtle);
   color: var(--color-text-muted-strong);
@@ -28,8 +28,8 @@
 .trigger:focus,
 .trigger:focus-visible
 {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: var(--border-width-focus) solid var(--color-focus);
+  outline-offset: var(--outline-offset);
 }
 
 .dropdown
@@ -37,9 +37,9 @@
   position: absolute;
   top: calc(100% + var(--space-4));
   left: 0;
-  min-width: 160px;
+  min-width: var(--size-dropdown-min);
   padding: var(--space-3) 0;
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-xl);
   background-color: var(--color-bg-surface);
   box-shadow: 0 var(--space-4) var(--space-5) var(--color-shadow);
@@ -75,7 +75,7 @@
 
 .separator
 {
-  height: 1px;
+  height: var(--border-width);
   margin: var(--space-3) 0;
   background-color: var(--color-border);
 }

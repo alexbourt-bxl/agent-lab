@@ -4,7 +4,7 @@
   align-items: center;
   gap: var(--space-3);
   border-radius: var(--radius-xl);
-  padding: 0.7rem 1rem;
+  padding: var(--space-5) var(--space-6);
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   font-family: inherit;
@@ -19,8 +19,8 @@
 
 .button:focus-visible
 {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: var(--border-width-focus) solid var(--color-focus);
+  outline-offset: var(--outline-offset);
 }
 
 .buttonIcon
@@ -31,15 +31,15 @@
 
 .buttonElapsed
 {
-  margin-left: 0.35rem;
-  opacity: 0.85;
+  margin-left: var(--space-3);
+  opacity: var(--opacity-muted);
 }
 
 .buttonSpinner
 {
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid currentColor;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  border: var(--border-width-focus) solid currentColor;
   border-right-color: transparent;
   border-radius: var(--radius-full);
   animation: buttonSpin var(--animation-spin-duration) linear infinite;
@@ -60,7 +60,7 @@
 
 .buttonPrimary
 {
-  border: 1px solid var(--color-border-subtle);
+  border: var(--border-width) solid var(--color-border-subtle);
   background-color: var(--color-bg-surface-elevated);
   color: var(--color-text-strong);
 }
@@ -79,7 +79,7 @@
 
 .buttonSecondary
 {
-  border: 1px solid var(--color-border-subtle);
+  border: var(--border-width) solid var(--color-border-subtle);
   background-color: var(--color-bg-surface-subtle);
   color: var(--color-text-muted-strong);
 }
@@ -97,8 +97,8 @@
 
 .buttonRun
 {
-  min-width: 120px;
-  border: 1px solid var(--color-accent-green-border);
+  min-width: var(--size-button-min);
+  border: var(--border-width) solid var(--color-accent-green-border);
   background-color: var(--color-accent-green);
   color: var(--color-on-accent);
 }
@@ -117,8 +117,8 @@
 
 .buttonRunActive
 {
-  min-width: 120px;
-  border: 1px solid var(--color-accent-orange-border);
+  min-width: var(--size-button-min);
+  border: var(--border-width) solid var(--color-accent-orange-border);
   background-color: var(--color-accent-orange);
   color: var(--color-on-accent);
 }
@@ -139,7 +139,7 @@
 {
   padding: var(--space-4) var(--space-5);
   font-size: var(--font-size-xs);
-  border: 1px solid var(--color-border-subtle);
+  border: var(--border-width) solid var(--color-border-subtle);
   background-color: var(--color-bg-surface-subtle);
   color: var(--color-text-muted-strong);
 }

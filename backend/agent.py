@@ -400,7 +400,7 @@ class Agent:
                 "hand work back until satisfied. Only the reviewing agent should set "
                 "done to true after approval.\n",
                 "If the task involves creating a file, use write_file_tool. "
-                "Write final deliverable to session folder (e.g. output.md) before "
+                "Write final deliverable (e.g. output.md) before "
                 "setting done to true.\n",
                 "",
                 "## Response format\n",

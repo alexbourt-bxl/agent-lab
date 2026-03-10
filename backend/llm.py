@@ -74,17 +74,6 @@ class OllamaInterface:
         except httpx.ReadTimeout as error:
             return f"Error: Ollama timed out after {self.timeout:.0f}s."
         except httpx.RequestError as error:
-            # region agent log
-            _debug_log(
-                "H3",
-                "ollama_generate_request_error",
-                {
-                    "baseUrl": self.base_url,
-                    "errorType": type(error).__name__,
-                    "error": str(error),
-                },
-            )
-            # endregion
             return f"Error: Ollama is not reachable. {error!s}"
         except httpx.HTTPStatusError as error:
             return f"Error: Ollama returned status {error.response.status_code}."
@@ -124,21 +113,6 @@ class OllamaInterface:
         except httpx.ReadTimeout:
             yield f"Error: Ollama timed out after {self.timeout:.0f}s."
         except httpx.RequestError as error:
-            # region agent log
-            try:
-                from agent_log import _debug_log
-                _debug_log(
-                    "H3",
-                    "ollama_generate_request_error",
-                    {
-                        "baseUrl": self.base_url,
-                        "errorType": type(error).__name__,
-                        "error": str(error),
-                    },
-                )
-            except ImportError:
-                pass
-            # endregion
             yield f"Error: Ollama is not reachable. {error!s}"
         except httpx.HTTPStatusError:
             yield "Error: Ollama returned a non-2xx status."

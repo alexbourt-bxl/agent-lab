@@ -1,0 +1,6 @@
+---
+description: 
+alwaysApply: true
+---
+
+When creating and modifying UI, always first consult the existing design system (style.css and others) for existing tokens. Try not to use raw values. If you need to use a raw value that is not found as a token in the design system, add a relevant token, and then use that token.

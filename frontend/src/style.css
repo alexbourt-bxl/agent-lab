@@ -21,6 +21,7 @@
   --color-accent-yellow: #facc15;
   --color-accent-green: #4ade80;
   --color-accent-green-hover: #22c55e;
+  --color-accent-green-tab-hover: #86efac;
   --color-accent-green-border: rgba(34, 197, 94, 0.5);
   --color-accent-red: #f87171;
   --color-overlay: rgba(255, 255, 255, 0.15);
@@ -47,6 +48,7 @@
   --color-on-accent-overlay-weak: rgba(255, 255, 255, 0.1);
   --color-on-accent-overlay-mid: rgba(255, 255, 255, 0.35);
   --color-on-accent-overlay-strong: rgba(255, 255, 255, 0.6);
+  --color-output-bg: #ffffff0c;
 }
 
 [data-theme="light"]
@@ -70,6 +72,7 @@
   --color-accent-yellow: #ca8a04;
   --color-accent-green: #16a34a;
   --color-accent-green-hover: #15803d;
+  --color-accent-green-tab-hover: #15803d;
   --color-accent-green-border: rgba(21, 128, 61, 0.5);
   --color-accent-red: #dc2626;
   --color-overlay: rgba(0, 0, 0, 0.08);
@@ -92,6 +95,7 @@
   --color-on-accent-overlay-weak: rgba(255, 255, 255, 0.1);
   --color-on-accent-overlay-mid: rgba(255, 255, 255, 0.35);
   --color-on-accent-overlay-strong: rgba(255, 255, 255, 0.6);
+  --color-output-bg: #0000000c;
 }
 
 :root
@@ -138,6 +142,20 @@
   --breakpoint-md: 900px;
   --z-dropdown: 100;
   --size-resize-handle: 8px;
+  --size-viewport-min: 320px;
+  --size-icon: 1rem;
+  --size-trigger: 40px;
+  --size-button-min: 120px;
+  --size-dropdown-min: 160px;
+  --size-editor-min: 200px;
+  --size-log-timestamp: 140px;
+  /* Border */
+  --border-width: 1px;
+  --border-width-focus: 2px;
+  --outline-offset: 2px;
+  /* Opacity */
+  --opacity-muted: 0.85;
+  --opacity-subtle: 0.9;
 }
 
 *
@@ -150,7 +168,7 @@ body,
 #root
 {
   margin: 0;
-  min-width: 320px;
+  min-width: var(--size-viewport-min);
   min-height: 100vh;
 }
 
@@ -162,7 +180,7 @@ body
 button
 {
   border-radius: var(--radius-xl);
-  padding: 0.7rem 1rem;
+  padding: var(--space-5) var(--space-6);
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   font-family: inherit;
@@ -173,6 +191,6 @@ button
 button:focus,
 button:focus-visible
 {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: var(--border-width-focus) solid var(--color-focus);
+  outline-offset: var(--outline-offset);
 }

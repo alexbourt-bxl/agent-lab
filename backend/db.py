@@ -4,7 +4,16 @@ import os
 from typing import Any
 
 
+_SUPABASE_CLIENT: Any | None = None
+_SESSION_ROW_CACHE: dict[str, dict[str, Any]] = {}
+
+
 def _get_client():
+    global _SUPABASE_CLIENT
+
+    if _SUPABASE_CLIENT is not None:
+        return _SUPABASE_CLIENT
+
     from supabase import create_client
 
     url = os.environ.get("SUPABASE_URL", "http://127.0.0.1:54321")
@@ -16,14 +25,20 @@ def _get_client():
             "SUPABASE_SERVICE_KEY or SUPABASE_ANON_KEY required. "
             "Run 'supabase start' and use 'supabase status' for keys."
         )
-    return create_client(url, key)
+    _SUPABASE_CLIENT = create_client(url, key)
+    return _SUPABASE_CLIENT
 
 
 def _session_row_by_id(session_id: str) -> dict[str, Any] | None:
+    cached = _SESSION_ROW_CACHE.get(session_id)
+    if cached is not None:
+        return cached
+
     client = _get_client()
     r = client.table("sessions").select("id").eq("session_id", session_id).execute()
     if not r.data or len(r.data) == 0:
         return None
+    _SESSION_ROW_CACHE[session_id] = r.data[0]
     return r.data[0]
 
 
@@ -123,6 +138,16 @@ def insert_agent_output(session_id: str, agent_name: str, round_num: int, conten
         "round": round_num,
         "content": content,
     }).execute()
+
+
+def delete_agent_output(session_id: str, agent_name: str, round_num: int) -> None:
+    row = _session_row_by_id(session_id)
+    if not row:
+        return
+    client = _get_client()
+    client.table("agent_outputs").delete().eq(
+        "session_id", row["id"]
+    ).eq("agent_name", agent_name).eq("round", round_num).execute()
 
 
 def get_agent_output(session_id: str, agent_name: str, round_num: int) -> str | None:

@@ -4,7 +4,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-2xl);
   background-color: var(--color-bg-surface);
   overflow: hidden;
@@ -17,7 +17,7 @@
   justify-content: space-between;
   gap: var(--space-5);
   padding: var(--space-5) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: var(--border-width) solid var(--color-border);
 }
 
 .settingsHeader
@@ -53,9 +53,9 @@
 
 .settingsInput
 {
-  border: 1px solid var(--color-border-subtle);
+  border: var(--border-width) solid var(--color-border-subtle);
   border-radius: var(--radius-xl);
-  padding: 0.75rem 0.9rem;
+  padding: var(--space-5) var(--space-6);
   background-color: var(--color-bg-surface-subtle);
   color: var(--color-text-strong);
   font: inherit;

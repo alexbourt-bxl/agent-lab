@@ -13,14 +13,9 @@ Session and workflow state are **canonical in Supabase** (see `supabase/migratio
 | Agent output (per round) | `agent_outputs` | `session_id` (UUID FK to sessions), `agent_name`, `round`, `content`. This is the **canonical** store for result files like `analyst_6.md`. |
 | Saved agents (templates) | `agents` | Name, role, tools, code. |
 
-Reads for session files (e.g. GET `/sessions/{id}/{filename}`) prefer Supabase: workflow and agent code come from `db.read_session_code` / `get_session_code_parts`; result files like `researcher_3.md` come from `db.get_agent_output`. The filesystem is only used as a fallback for result files that are not yet (or no longer) in the DB.
-
-## Filesystem (secondary)
-
-- **`sessions/<session_id>/`** – Optional on-disk copies. Used by the agent `write_file_tool` when writing output (content is also written to `agent_outputs` via `record_result_file`). Listing and reading may include these files; listing merges DB-derived filenames with directory contents.
-- **Delete behavior** – `delete_session_file` currently only removes the file from the filesystem. It does not remove the corresponding row from `agent_outputs` or update the workflow snapshot. So for result files, the DB remains the source of truth after a "delete" from the API.
+Reads for session files (e.g. GET `/sessions/{id}/{filename}`) use Supabase only: workflow and agent code come from `db.read_session_code` / `get_session_code_parts`; result files like `researcher_3.md` come from `db.get_agent_output`.
 
 ## Summary
 
-- **Sessions, snapshots, code, and agent outputs**: Supabase is the source of truth.
-- **Files under `sessions/<id>/`**: Optional mirror/legacy; agent outputs are written to both DB and (when using the file tool) disk. Deletes only affect disk.
+- **Sessions, snapshots, code, and agent outputs**: Supabase is the sole source of truth.
+- **No filesystem storage**: The `sessions/` folder is not used. Agent `write_file_tool` and all session file operations read/write via Supabase only. This enables deployment as a web app.

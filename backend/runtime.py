@@ -94,7 +94,7 @@ class WorkflowRunner:
                 await emit_event(
                     event_type="system",
                     message=f"{_workflow_prefix()}stopped after reaching the max round limit ({self._format_elapsed(elapsed)}).",
-                    state="done",
+                    state="stopped",
                     round_number=self.max_rounds,
                 )
                 break
@@ -181,7 +181,7 @@ class WorkflowRunner:
                 await emit_event(
                     event_type="system",
                     message=f"{_workflow_prefix()}stopped because no next agent was available ({self._format_elapsed(elapsed)}).",
-                    state="done",
+                    state="stopped",
                     round_number=agent_round,
                 )
                 break

@@ -7,7 +7,6 @@ from .workflow import (
     WORKFLOW_CODE_FILENAME,
     _agent_name_to_kebab,
     _ensure_agent_snapshot,
-    get_session_directory,
     kebab_to_class_name,
     read_workflow_snapshot,
     update_workflow_snapshot,
@@ -59,24 +58,7 @@ def list_session_files(session_id: str) -> list[str]:
                 kebab = _agent_name_to_kebab(name)
                 files.add(f"{kebab}_{rnd}.md")
 
-    session_dir = get_session_directory(resolved_session_id)
-    if session_dir.exists():
-        for f in session_dir.iterdir():
-            if f.is_file():
-                files.add(f.name)
-
     return sorted(files)
-
-
-def resolve_session_result_path(session_id: str, filename: str) -> Path:
-    from .workflow import _normalize_session_id
-
-    resolved_session_id = _normalize_session_id(session_id)
-    if resolved_session_id is None:
-        raise ValueError("Session ID is required.")
-
-    safe_filename = Path(filename).name
-    return get_session_directory(resolved_session_id) / safe_filename
 
 
 def read_session_result_file(session_id: str, filename: str) -> str:
@@ -106,10 +88,6 @@ def read_session_result_file(session_id: str, filename: str) -> str:
         content = _db.get_agent_output(resolved_session_id, parsed_agent, parsed_round)
         if content is not None:
             return content
-
-    target_path = resolve_session_result_path(session_id, filename)
-    if target_path.exists():
-        return target_path.read_text(encoding="utf-8")
 
     raise FileNotFoundError(filename)
 
@@ -153,13 +131,16 @@ def write_session_file(session_id: str, filename: str, content: str) -> None:
         update_workflow_snapshot(apply, resolved_session_id)
         return
 
-    session_dir = get_session_directory(resolved_session_id)
-    session_dir.mkdir(parents=True, exist_ok=True)
-    target_path = session_dir / safe_name
-    target_path.write_text(content, encoding="utf-8")
+    raise ValueError(
+        f"Unsupported file type for session storage: {safe_name}. "
+        "Only workflow code, agent code (.py), and agent result files (agent_N.md) are supported."
+    )
 
 
 def delete_session_file(session_id: str, filename: str) -> None:
+    import db as _db
+
+    from .code_extraction import _get_agent_name_from_class
     from .workflow import _normalize_session_id
 
     resolved_session_id = _normalize_session_id(session_id)
@@ -167,6 +148,32 @@ def delete_session_file(session_id: str, filename: str) -> None:
         raise ValueError("Session ID is required.")
 
     safe_name = Path(filename).name
-    target_path = get_session_directory(resolved_session_id) / safe_name
-    if target_path.exists():
-        target_path.unlink()
+    if safe_name == WORKFLOW_CODE_FILENAME:
+        workflow_code, agent_code = _db.get_session_code_parts(resolved_session_id)
+        agent_code_by_name = {_get_agent_name_from_class(b) or k: b for k, b in agent_code.items()}
+        _db.write_session_code(resolved_session_id, "", agent_code_by_name)
+        return
+
+    if safe_name.endswith(".py"):
+        workflow_code, agent_code = _db.get_session_code_parts(resolved_session_id)
+        stem = Path(safe_name).stem
+        class_name = kebab_to_class_name(stem)
+        if class_name in agent_code:
+            del agent_code[class_name]
+        agent_code_by_name = {_get_agent_name_from_class(b) or k: b for k, b in agent_code.items()}
+        _db.write_session_code(resolved_session_id, workflow_code, agent_code_by_name)
+        return
+
+    parsed_agent, parsed_round = _parse_result_filename(safe_name)
+    if parsed_agent is not None and parsed_round is not None:
+        _db.delete_agent_output(resolved_session_id, parsed_agent, parsed_round)
+
+        def apply(s: dict) -> None:
+            agent = _ensure_agent_snapshot(s, parsed_agent)
+            rfs = agent.get("resultFiles", [])
+            if safe_name in rfs:
+                agent["resultFiles"] = [f for f in rfs if f != safe_name]
+            if agent.get("lastResultFile") == safe_name:
+                agent["lastResultFile"] = agent["resultFiles"][-1] if agent["resultFiles"] else None
+
+        update_workflow_snapshot(apply, resolved_session_id)

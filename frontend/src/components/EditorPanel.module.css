@@ -13,7 +13,7 @@
   flex-wrap: wrap;
   gap: var(--space-1);
   padding: var(--space-4) var(--space-5) 0;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: var(--border-width) solid var(--color-border);
   background-color: var(--color-bg-surface);
 }
 
@@ -23,7 +23,7 @@
   display: inline-flex;
   align-items: center;
   padding: var(--space-4) var(--space-5);
-  border: 1px solid transparent;
+  border: var(--border-width) solid transparent;
   border-bottom: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background-color: transparent;
@@ -39,8 +39,8 @@
 .tab:focus-visible,
 .tabActive:focus-visible
 {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: var(--border-width-focus) solid var(--color-focus);
+  outline-offset: var(--outline-offset);
 }
 
 .tab:hover
@@ -54,7 +54,7 @@
   color: var(--color-text-strong);
   background-color: var(--color-bg-surface-elevated);
   border-color: var(--color-border);
-  margin-bottom: -1px;
+  margin-bottom: calc(-1 * var(--border-width));
 }
 
 .tabActiveAgent
@@ -81,7 +81,7 @@
 {
   width: var(--space-5);
   height: var(--space-5);
-  border: 2px solid currentColor;
+  border: var(--border-width-focus) solid currentColor;
   border-right-color: transparent;
   border-radius: var(--radius-full);
   animation: tabSpin var(--animation-spin-duration) linear infinite;
@@ -117,8 +117,8 @@
 
 .tabClose:focus-visible
 {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: var(--border-width-focus) solid var(--color-focus);
+  outline-offset: var(--outline-offset);
 }
 
 .tabClose:hover
@@ -129,7 +129,7 @@
 .tabAdd
 {
   padding: var(--space-4) var(--space-5);
-  border: 1px solid transparent;
+  border: var(--border-width) solid transparent;
   border-bottom: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background-color: transparent;
@@ -142,8 +142,8 @@
 
 .tabAdd:focus-visible
 {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: var(--border-width-focus) solid var(--color-focus);
+  outline-offset: var(--outline-offset);
 }
 
 .tabAdd:hover
@@ -195,7 +195,7 @@
   position: absolute;
   inset: 0;
   border-radius: var(--radius-full);
-  opacity: 0.9;
+  opacity: var(--opacity-subtle);
 }
 
 .verticalResizeHandle:hover::before
@@ -211,14 +211,27 @@
   flex-wrap: wrap;
   gap: var(--space-6);
   padding: var(--space-5) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: var(--border-width) solid var(--color-border);
   background-color: var(--color-bg-surface-elevated);
 }
 
 .workflowHeaderDone
 {
-  background-color: var(--color-status-done-bg);
+  background-color: var(--color-accent-green);
   border-bottom-color: var(--color-accent-green-border);
+  color: var(--color-on-accent);
+}
+
+.workflowHeaderDone .workflowId,
+.workflowHeaderDone .workflowProgress
+{
+  color: var(--color-on-accent-muted);
+}
+
+.workflowHeaderDone .workflowStatusBadge[data-status="done"]
+{
+  background-color: var(--color-on-accent-overlay-weak);
+  color: var(--color-on-accent);
 }
 
 .workflowHeaderError
@@ -229,9 +242,15 @@
 
 .tabWorkflowDone
 {
-  background-color: var(--color-status-done-bg);
-  color: var(--color-status-done);
+  background-color: var(--color-accent-green);
+  color: var(--color-on-accent);
   border-color: var(--color-accent-green-border);
+}
+
+.tabWorkflowDone:hover
+{
+  background-color: var(--color-accent-green-tab-hover);
+  color: var(--color-on-accent);
 }
 
 .tabWorkflowError
@@ -260,6 +279,7 @@
   padding: var(--space-1) var(--space-4);
   border-radius: var(--radius-md);
   background-color: var(--color-bg-surface-raised);
+  color: var(--color-text);
   font-weight: var(--font-weight-medium);
 }
 
@@ -304,29 +324,29 @@
 
 .workflowId
 {
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 
 .workflowElapsed
 {
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-muted-strong);
-  background-color: #0001;
-  padding: 0.2rem 0.7rem;
-  border-radius: 1rem;
+  color: var(--color-on-accent);
+  background-color: var(--color-accent-orange);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-full);
 }
 
 .agentHeader
 {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+  border-bottom: var(--border-width) solid var(--color-border);
   background-color: var(--color-bg-surface-elevated);
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
   color: var(--color-text);
 }
 
@@ -375,31 +395,32 @@
 
 .agentHeaderWorking .agentElapsed
 {
-  color: #fff;
+  color: var(--color-text);
 }
 
 .agentElapsed
 {
-  font-weight: 500;
-  color: var(--color-accent-blue);
-  background-color: #ffffff2a;
-  padding: 0.2rem 0.7rem;
-  border-radius: 1rem;
+  font-weight: var(--font-weight-medium);
+  background-color: var(--color-bg-surface);
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-full);
+  
 }
 
 .roundSelector
 {
   display: flex;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .roundBtn,
 .roundBtnActive
 {
-  padding: 2px 8px;
-  font-size: 12px;
-  border-radius: 4px;
-  border: 1px solid transparent;
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid transparent;
   cursor: pointer;
   background-color: transparent;
   color: inherit;
@@ -412,7 +433,7 @@
 
 .agentHeaderWorking .roundBtn:hover
 {
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--color-on-accent-overlay-weak);
 }
 
 .agentHeader .roundBtnActive
@@ -424,8 +445,8 @@
 
 .agentHeaderWorking .roundBtnActive
 {
-  background-color: rgba(255, 255, 255, 0.35);
-  border-color: rgba(255, 255, 255, 0.6);
+  background-color: var(--color-on-accent-overlay-mid);
+  border-color: var(--color-on-accent-overlay-strong);
 }
 
 .agentStatus
@@ -436,7 +457,7 @@
 .editorShell
 {
   flex: 1;
-  min-height: 200px;
+  min-height: var(--size-editor-min);
   min-width: 0;
   overflow: hidden;
 }
@@ -454,12 +475,12 @@
 
 [data-theme="dark"] 
 .outputContent {
-  background-color: #ffffff0c;
+  background-color: var(--color-output-bg);
 }
 
 [data-theme="light"] 
 .outputContent {
-  background-color: #0000000c;
+  background-color: var(--color-output-bg);
 }
 
 .outputPre

@@ -148,6 +148,13 @@ function EditorPanel(
   const [codePaneWidthPercent, setCodePaneWidthPercent] = useState(readCodePaneWidth);
   const [selectedRoundByAgent, setSelectedRoundByAgent] = useState<Record<string, number>>({});
 
+  const hasAnyAgentActive = Object.values(agentStatuses).some(
+    (s) =>
+      s.state === 'working' ||
+      s.state === 'executing' ||
+      s.state === 'thinking',
+  );
+
   const parsedConfigs = parseAgentConfigsFromCode(code);
   const agentConfigs =
     agentOrder.length > 0
@@ -205,7 +212,7 @@ function EditorPanel(
           }}
         >
           <span className={styles.tabContent}>
-            {workflowRunning && <span className={styles.tabSpinner} aria-hidden />}
+            {workflowRunning && !hasAnyAgentActive && <span className={styles.tabSpinner} aria-hidden />}
             Workflow
           </span>
         </button>

@@ -128,6 +128,8 @@ async def put_session_file(
 ) -> dict[str, str]:
     try:
         write_session_file(session_id, filename, request.content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found.") from None
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session or filename.") from None
 
@@ -138,6 +140,8 @@ async def put_session_file(
 async def delete_session_file_endpoint(session_id: str, filename: str) -> dict[str, str]:
     try:
         delete_session_file(session_id, filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found.") from None
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid session or filename.") from None
 
